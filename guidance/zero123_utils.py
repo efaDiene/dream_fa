@@ -74,7 +74,7 @@ class Zero123(nn.Module):
 
     @torch.no_grad()
     def refine(self, pred_rgb, elevation, azimuth, radius, 
-               guidance_scale=5, steps=50, strength=0.8, default_elevation=0,
+               guidance_scale=10, steps=50, strength=0.8, default_elevation=0,
         ):
 
         batch_size = pred_rgb.shape[0]
@@ -117,7 +117,7 @@ class Zero123(nn.Module):
         imgs = self.decode_latents(latents) # [1, 3, 256, 256]
         return imgs
     
-    def train_step(self, pred_rgb, elevation, azimuth, radius, step_ratio=None, guidance_scale=5, as_latent=False, default_elevation=0):
+    def train_step(self, pred_rgb, elevation, azimuth, radius, step_ratio=None, guidance_scale=10, as_latent=False, default_elevation=0):
         # pred_rgb: tensor [1, 3, H, W] in [0, 1]
 
         batch_size = pred_rgb.shape[0]
