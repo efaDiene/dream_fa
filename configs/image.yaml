@@ -1,4 +1,7 @@
 ### Input
+# transforms.json file 
+transforms_file : "data/transforms.json"
+selected_images : ["data/00000021.jpg","data/00000007.jpg","data/00000041.jpg","data/00000116.jpg"]
 # input rgba image path (default to None, can be load in GUI too)
 input: 
 # input text prompt (default to None, can be input in GUI too)
@@ -9,7 +12,7 @@ mesh:
 # estimated elevation angle for input image 
 elevation: 0
 # reference image resolution
-ref_size: 512
+ref_size: 1024
 # density thresh for mesh extraction
 density_thresh: 1
 
@@ -32,6 +35,7 @@ lambda_zero123: 1
 warmup_rgb_loss: True
 # training batch size per iter
 batch_size: 1
+
 # training iterations for stage 1
 iters: 500
 # whether to linearly anneal timestep
