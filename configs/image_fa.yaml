@@ -1,11 +1,11 @@
 ### Input
-# transforms.json file 
-transforms_file : "data/transforms.json"
-selected_images : ["images/00000021.jpg","images/00000007.jpg","images/00000041.jpg","images/00000116.jpg"]
 # input rgba image path (default to None, can be load in GUI too)
 input: 
+input2: "data/i00000116_rgba.png"
+input3: "data/i00000041_rgba.png"
+input4: "data/i00000007_rgba.png"
 # input text prompt (default to None, can be input in GUI too)
-prompt:
+prompt: "a DSLR photo of a vehicle"
 negative_prompt:
 # input mesh for stage 2 (auto-search from stage 1 output path if None)
 mesh:
@@ -34,8 +34,7 @@ lambda_zero123: 1
 # warmup rgb supervision for image-to-3d
 warmup_rgb_loss: True
 # training batch size per iter
-batch_size: 8
-
+batch_size: 4
 # training iterations for stage 1
 iters: 500
 # whether to linearly anneal timestep
@@ -55,7 +54,7 @@ load:
 # whether allow geom training in stage 2
 train_geo: False
 # prob to invert background color during training (0 = always black, 1 = always white)
-invert_bg_prob: 0
+invert_bg_prob: 0.5
 
 
 ### GUI
@@ -66,7 +65,7 @@ H: 800
 W: 800
 
 ### Gaussian splatting
-num_pts: 10000
+num_pts: 8000
 sh_degree: 0
 position_lr_init: 0.001
 position_lr_final: 0.00002

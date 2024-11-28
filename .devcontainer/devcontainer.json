@@ -1,0 +1,109 @@
+{
+	"name": "Python GPU devcontainer of adv-eng team",
+	"image": "quay.io/leddartech/advanced-engineering:python-gpu-devcontainer_ubuntu-22.04_cuda-11.8.0_cuda-compute-86_v0.0.25",
+	// For a6000 servers use the pre-built image below
+	// "image": "quay.io/leddartech/advanced-engineering:python-gpu-devcontainer_ubuntu-22.04_cuda-11.8.0_cuda-compute-89_v0.0.12",
+	//"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"workspaceFolder": "/workspace",
+	"mounts": [
+		// for global data
+		"source=/data,target=/data,type=bind,consistency=cached",
+		"source=/pipelines,target=/pipelines,type=bind,consistency=cached",
+		// config files
+		"source=${localEnv:HOME}/.netrc,target=/home/user/.netrc,type=bind,consistency=cached",
+		"source=${localEnv:HOME}/.bash_history,target=/commandhistory/.bash_history,type=bind,consistency=cached",
+		//"source=${localEnv:HOME}/.gitconfig,target=/home/user/.gitconfig,type=bind,consistency=cached",
+		// for conda persistancy
+		"source=${localEnv:HOME}/conda_for_docker_persist/envs,target=/opt/conda/envs,type=bind,consistency=cached",
+		"source=${localEnv:HOME}/conda_for_docker_persist/pkgs,target=/opt/conda/pkgs,type=bind,consistency=cached"
+	],
+	"runArgs": [
+		"-it", // interactive and tty
+		//hardware options 
+		"--shm-size=48gb", //TODO: verify how much is reasonable
+		"--runtime","nvidia",
+		"--env","NVIDIA_VISIBLE_DEVICES=0,1", // can be set to all or 0 or 0,1,2,3,4 depending on the number of gpu this changes visible device in container (cannot seen with nvidia-smi, cannot change after container started)
+		"--env","NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics",
+		//"--env","CUDA_VISIBLE_DEVICES=0,2", //this changes cuda visible device to devcontainer, visibile wiht nvidia-smi but not usable expcet for change of environement variable from container
+		"--env","DISPLAY=$DISPLAY",
+		"--env","MPLBACKEND=TkAgg",
+		// port mapping
+		"--publish","7007:7007",
+		// volume mount
+		"--volume","${localWorkspaceFolder}:/workspace/",
+		// for gui apps
+		"--volume","/tmp/.X11-unix:/tmp/.X11-unix:ro",
+		"--volume","${localEnv:HOME}/.Xauthority:/home/user/.Xauthority",
+		"--network","host"
+	],
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// This can be useful when running network viewer/web apps etc,
+	// like viser (nerfstudio viewer) or streamlit applications.
+	//"forwardPorts": [],
+
+	// This initializeCommand will be run on host before building devcontainer
+	// We touch these files to avoid error when mounting if files not exists on host
+	"initializeCommand": {
+		"create_netrc_if_not_exists": "touch $HOME/.netrc", // touch to avoid mount problems, this is where some credentials are stored like wandb 
+		"create_bashhistory_if_not_exists": "touch $HOME/.bash_history", // touch to avoid mount problems, On ubuntu system this is where bash_history is saved. We want to keep this linked to our devcontainer.
+		//"create_gitconfig_if_not_exists": "touch $HOME/.gitconfig", //On ubuntu system this is where gitconfig is saved. We want to keep this linked to our devcontainer.
+		// We want to create local folder for conda envs and pkgs
+		"make_conda_dir": "mkdir -p $HOME/conda_for_docker_persist",
+		"make_conda_envs_dir": "mkdir -p $HOME/conda_for_docker_persist/envs",
+		"make_conda_pkgs_dir": "mkdir -p $HOME/conda_for_docker_persist/pkgs"
+	},
+
+	// Uncomment the next line to run commands after the container is created.
+	// When openning a .devcontainer for an installable python package this line is important
+	"postCreateCommand": {
+		"install_python_package": "pip install -e .[all]"
+	},
+
+	// Configure tool-specific properties.
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				// Python extension
+				"ms-python.autopep8",
+				"ms-python.vscode-pylance",
+				"ms-python.python",
+				"ms-python.debugpy",
+				// Jupyter notebooks
+				"ms-toolsai.jupyter",
+				"ms-toolsai.vscode-jupyter-cell-tags",
+				"ms-toolsai.jupyter-renderers",
+				"ms-toolsai.vscode-jupyter-slideshow",
+				// Remote/ssh
+				"ms-azuretools.vscode-docker",
+				"ms-vscode-remote.remote-containers",
+				"ms-vscode-remote.remote-ssh-edit",
+				"ms-vscode.remote-server",
+				"ms-vscode-remote.vscode-remote-extensionpack",
+				"ms-vscode.remote-explorer",
+				// data display tools
+				"ms-toolsai.datawrangler", // tabular data like dataframes
+				"percy.vscode-numpy-viewer",
+				"geriyoco.vscode-image-gallery", //images
+				// Code completion
+				"njpwerner.autodocstring", //dosctrings for functions and classes
+				// Git extension
+				"eamodio.gitlens",
+				"mhutchie.git-graph",
+				// AI based Code completion
+				"njpwerner.autodocstring",
+				//"amazonwebservices.amazon-q-vscode",  //AI based - Requires amazon login, can be done with personnal google account.
+				// cpp
+				"ms-vscode.cpptools",
+				// Work management
+				"atlassian.atlascode",
+				// syntax highlighter
+				"redhat.vscode-yaml",
+				"mechatroner.rainbow-csv",
+				// file formater
+				"euskadi31.json-pretty-printer"
+			]}
+	},
+	"remoteUser": "user",
+	"containerUser": "user",
+	"updateRemoteUserUID": true
+}

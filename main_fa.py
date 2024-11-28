@@ -3,7 +3,6 @@ import cv2
 import time
 import tqdm
 import numpy as np
-import json
 import dearpygui.dearpygui as dpg
 
 import torch
@@ -11,7 +10,7 @@ import torch.nn.functional as F
 
 import rembg
 
-from cam_utils import orbit_camera, OrbitCamera
+from cam_utils import orbit_camera,extract_azimuth_elevation, OrbitCamera
 from gs_renderer import Renderer, MiniCam
 
 from grid_put import mipmap_linear_grid_put_2d
@@ -53,11 +52,13 @@ class GUI:
         self.overlay_input_img = False
         self.overlay_input_img_ratio = 0.5
 
-        self.images_data = []  # To store the data for each image
-
-        # Load input data from transforms.json
-        if self.opt.transforms_file is not None:
-            self.load_input_from_transforms(self.opt.transforms_file)
+        # input image2
+        self.input_img2 = None
+        self.input_mask2 = None
+        self.input_img_torch2 = None
+        self.input_mask_torch2 = None
+        self.overlay_input_img2 = False
+        self.overlay_input_img_ratio2 = 0.5
 
         # input text
         self.prompt = ""
@@ -72,6 +73,15 @@ class GUI:
         # load input data from cmdline
         if self.opt.input is not None:
             self.load_input(self.opt.input)
+        # load input data from cmdline
+        if self.opt.input2 is not None:
+            self.load_input2(self.opt.input2)
+        # load input data from cmdline
+        if self.opt.input3 is not None:
+            self.load_input3(self.opt.input3)
+        # load input data from cmdline
+        if self.opt.input4 is not None:
+            self.load_input4(self.opt.input4)
         
         # override prompt from cmdline
         if self.opt.prompt is not None:
@@ -110,123 +120,6 @@ class GUI:
 
         self.last_seed = seed
 
-    def load_input_from_transforms(self, transforms_file):
-        #print(f'[INFO] Chargement des transformations depuis {transforms_file}...')
-        
-        # Charger les transformations depuis le fichier JSON
-        with open(transforms_file) as f:
-            data = json.load(f)
-
-        # Liste d'images sélectionnées (par exemple, par indices ou par chemin)
-        selected_images = self.opt.selected_images  # Liste d'indices ou chemins de fichiers
-
-        for i, frame in enumerate(data["frames"]):
-            if frame["file_path"] in selected_images or i in selected_images:
-                # Remplacer "images/" par "data/" dans le chemin du fichier
-                image_path = frame["file_path"].replace("images/", "data/")
-
-                # Modifier l'extension en .png
-                image_path = image_path.rsplit('.', 1)[0] + '.png'
-            
-                transform_matrix = np.array(frame["transform_matrix"])
-
-                # Calculer l'azimut et l'élévation à partir de la matrice de transformation
-                azimuth, elevation = self.extract_azimuth_elevation(transform_matrix)
-
-                # Ajouter "_rgba" au nom de fichier de l'image sélectionnée
-                rgba_image_path = self.add_rgba_suffix(image_path)
-
-                # Stocker les données de l'image avec azimut et élévation
-                self.images_data.append({
-                    "image_path": rgba_image_path,
-                    "azimuth": azimuth,
-                    "elevation": elevation,
-                    "transform_matrix": transform_matrix,
-                    "mask_path": frame["mask_path"]  # Ajout du chemin du masque
-                })
-                print(f"[INFO] Image sélectionnée: {image_path}")
-
-    def add_rgba_suffix(self, image_path):
-        # Ajouter le suffixe "_rgba" avant l'extension du fichier
-        base, ext = os.path.splitext(image_path)
-        rgba_image_path = f"{base}_rgba{ext}"
-        return rgba_image_path
-
-    def calculate_azimuth_elevation(self, transform_matrix):
-        # Extraire le vecteur de direction (colonne 3 de la matrice)
-        direction = transform_matrix[2, :3]
-        
-        # Calcul de l'azimut (en degrés)
-        azimuth = np.arctan2(direction[0], direction[2]) * 180 / np.pi
-        
-        # Calcul de l'élévation (en degrés)
-        elevation = np.arcsin(direction[1]) * 180 / np.pi
-        
-        return azimuth, elevation
-    
-    def extract_azimuth_elevation(self, T):
-        # Matrice de rotation (3x3)
-        R = T[:3, :3]
-        
-        # Azimut (angle horizontal autour de l'axe z)
-        azimuth = np.arctan2(R[1, 0], R[0, 0])  # atan2(R[1, 0], R[0, 0])
-        
-        # Elévation (angle vertical autour de l'axe y)
-        elevation = np.arcsin(-R[2, 0])  # asin(-R[2, 0])
-        
-        # Conversion en degrés si nécessaire
-        azimuth_deg = np.rad2deg(azimuth)
-        elevation_deg = np.rad2deg(elevation)
-        
-        return azimuth_deg, elevation_deg 
-    
-    def process_images_with_dreamgaussian(self):
-        totalLoss=0
-        for image_data in self.images_data:
-            image_path = image_data["image_path"]
-            azimuth = image_data["azimuth"]
-            elevation = image_data["elevation"]
-            transform_matrix = image_data["transform_matrix"]
-
-            # Utiliser l'azimut et l'élévation pour définir le pose de la caméra
-            pose = orbit_camera(elevation, azimuth, self.opt.radius)
-            self.fixed_cam = MiniCam(
-                pose,
-                self.opt.ref_size,
-                self.opt.ref_size,
-                self.cam.fovy,
-                self.cam.fovx,
-                self.cam.near,
-                self.cam.far,
-            )
-
-            # Charger l'image d'entrée (si elle n'est pas déjà chargée)
-            self.load_input(image_path)
-
-            if self.input_img is not None:
-                self.input_img_torch = torch.from_numpy(self.input_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
-                self.input_img_torch = F.interpolate(self.input_img_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
-
-                self.input_mask_torch = torch.from_numpy(self.input_mask).permute(2, 0, 1).unsqueeze(0).to(self.device)
-                self.input_mask_torch = F.interpolate(self.input_mask_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
-
-                # Rendu et calcul de la perte pour l'image actuelle
-                cur_cam = self.fixed_cam
-                out = self.renderer.render(cur_cam)
-
-                # Perte RGB
-                image = out["image"].unsqueeze(0)  # [1, 3, H, W] dans [0, 1]
-                loss = F.mse_loss(image, self.input_img_torch)
-
-                # Perte de masque
-                mask = out["alpha"].unsqueeze(0)  # [1, 1, H, W] dans [0, 1]
-                loss += 1000 * F.mse_loss(mask, self.input_mask_torch)
-                totalLoss += loss
-
-                #print(f"Image traitée {image_path} avec perte: {loss.item()}")
-        return totalLoss
-
-
     def prepare_train(self):
 
         self.step = 0
@@ -242,9 +135,63 @@ class GUI:
             # the second view is the front view for mvdream/imagedream.
             pose = orbit_camera(self.opt.elevation, 90, self.opt.radius)
         else:
-            pose = orbit_camera(self.opt.elevation, 0, self.opt.radius)
+            T1=np.array([[0.9914812005580562,0.042540294266794725,0.123107076578277,0.6403368589861457],
+                        [0.11213179160333159,0.20209900326198604,-0.9729246909151492,-4.404663066986293],
+                        [-0.06626832012192753, 0.9784407576568989,0.19560724297431184, 0.6280872478304493],
+                        [0.0,0.0,0.0,1.0]])
+
+            T2=np.array([[-0.7255133758153133, 0.16008781379961542,-0.669329689604404,  -3.5211266181713743],
+                        [-0.6882000612020779,-0.16407294163500233,0.7067253678655477, 2.7937770033229232 ],
+                        [ 0.003319228001286951, 0.9733714407645709, 0.2292095570201615, 0.6019382195158107 ], 
+                        [0.0, 0.0, 0.0,1.0]]
+  )
+            T3=np.array([[-0.6746754311116187,-0.08681601004864213,0.7329911616476597,3.2015423336685735 ],
+                        [0.736727706605517,-0.14005170023378533, 0.6615268759327932,2.5178358588686636],
+                        [0.04522553453666382, 0.9863308276946736, 0.15844920121292183,0.6379604279301839 ],
+                        [ 0.0,0.0,0.0,1.0]])
+            T4=np.array([[0.3922094416962398,0.20701126227606687,-0.8962801409911931,-4.235969771002857],
+                        [-0.9196552365322843,0.1095852900501236,-0.37712771062781675,-1.7791805239229939],
+                        [0.020149435800337998,0.972181773895962,0.23335937680202273,0.5725921638470095],
+                        [ 0.0,0.0, 0.0,1.0]])
+            azimuth1, elevation1=extract_azimuth_elevation(T1)
+            azimuth2, elevation2=extract_azimuth_elevation(T2)
+            azimuth3, elevation3=extract_azimuth_elevation(T3)
+            azimuth4, elevation4=extract_azimuth_elevation(T4)
+            pose = orbit_camera(elevation1, azimuth1, self.opt.radius)
+            pose2 = orbit_camera(elevation2, azimuth2, self.opt.radius)
+            pose3 = orbit_camera(elevation3, azimuth3, self.opt.radius)
+            pose4 = orbit_camera(elevation4, azimuth4, self.opt.radius)
+            #pose = orbit_camera(self.opt.elevation, 0, self.opt.radius)
+            #pose2 = orbit_camera(elevation2, azimuth2, self.opt.radius)
         self.fixed_cam = MiniCam(
             pose,
+            self.opt.ref_size,
+            self.opt.ref_size,
+            self.cam.fovy,
+            self.cam.fovx,
+            self.cam.near,
+            self.cam.far,
+        )
+        self.fixed_cam2 = MiniCam(
+            pose2,
+            self.opt.ref_size,
+            self.opt.ref_size,
+            self.cam.fovy,
+            self.cam.fovx,
+            self.cam.near,
+            self.cam.far,
+        )
+        self.fixed_cam3 = MiniCam(
+            pose3,
+            self.opt.ref_size,
+            self.opt.ref_size,
+            self.cam.fovy,
+            self.cam.fovx,
+            self.cam.near,
+            self.cam.far,
+        )
+        self.fixed_cam4 = MiniCam(
+            pose4,
             self.opt.ref_size,
             self.opt.ref_size,
             self.cam.fovy,
@@ -283,13 +230,43 @@ class GUI:
                 self.guidance_zero123 = Zero123(self.device, model_key='ashawkey/zero123-xl-diffusers')
             print(f"[INFO] loaded zero123!")
 
-        # input image
+        # input image : essayer de mettre ici plusieurs images
+        
         if self.input_img is not None:
+            """ for i in range(input_imgs):
+                self.input_img_torch = torch.from_numpy(self.input_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
+                self.input_img_torch = F.interpolate(self.input_img_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+
+                self.input_mask_torch = torch.from_numpy(self.input_mask).permute(2, 0, 1).unsqueeze(0).to(self.device)
+                self.input_mask_torch = F.interpolate(self.input_mask_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False) """
             self.input_img_torch = torch.from_numpy(self.input_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
             self.input_img_torch = F.interpolate(self.input_img_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
 
             self.input_mask_torch = torch.from_numpy(self.input_mask).permute(2, 0, 1).unsqueeze(0).to(self.device)
             self.input_mask_torch = F.interpolate(self.input_mask_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+            
+            #input2
+            self.input_img_torch2 = torch.from_numpy(self.input_img2).permute(2, 0, 1).unsqueeze(0).to(self.device)
+            self.input_img_torch2 = F.interpolate(self.input_img_torch2, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+
+            self.input_mask_torch2 = torch.from_numpy(self.input_mask2).permute(2, 0, 1).unsqueeze(0).to(self.device)
+            self.input_mask_torch2 = F.interpolate(self.input_mask_torch2, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+            #input3
+            self.input_img_torch3 = torch.from_numpy(self.input_img3).permute(2, 0, 1).unsqueeze(0).to(self.device)
+            self.input_img_torch3 = F.interpolate(self.input_img_torch3, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+
+            self.input_mask_torch3 = torch.from_numpy(self.input_mask3).permute(2, 0, 1).unsqueeze(0).to(self.device)
+            self.input_mask_torch3 = F.interpolate(self.input_mask_torch3, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+            #self.input_img_torch_channel_last3 = self.input_img_torch3[0].permute(1,2,0).contiguous()
+
+            #input4
+            self.input_img_torch4 = torch.from_numpy(self.input_img4).permute(2, 0, 1).unsqueeze(0).to(self.device)
+            self.input_img_torch4 = F.interpolate(self.input_img_torch4, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+
+            self.input_mask_torch4 = torch.from_numpy(self.input_mask4).permute(2, 0, 1).unsqueeze(0).to(self.device)
+            self.input_mask_torch4 = F.interpolate(self.input_mask_torch4, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+            
+            #self.input_img_torch_channel_last4 = self.input_img_torch4[0].permute(1,2,0).contiguous()
 
         # prepare embeddings
         with torch.no_grad():
@@ -302,11 +279,13 @@ class GUI:
 
             if self.enable_zero123:
                 self.guidance_zero123.get_img_embeds(self.input_img_torch)
+                #self.guidance_zero123.get_img_embeds(self.input_img_torch2)
 
     def train_step(self):
         starter = torch.cuda.Event(enable_timing=True)
         ender = torch.cuda.Event(enable_timing=True)
         starter.record()
+        myLoss=[]
 
         for _ in range(self.train_steps):
 
@@ -316,12 +295,52 @@ class GUI:
             # update lr
             self.renderer.gaussians.update_learning_rate(self.step)
 
-            #loss = 0
+            loss = 0
 
-            ### known view
-            ### Process images with DreamGaussian
-            # Appel de la méthode pour traiter les images spécifiées
-            loss=self.process_images_with_dreamgaussian()
+            ### known views
+            #for view in input_views:
+            if self.input_img_torch is not None and not self.opt.imagedream:
+                cur_cam = self.fixed_cam
+                cur_cam2 = self.fixed_cam2
+                cur_cam3 = self.fixed_cam3
+                cur_cam4 = self.fixed_cam4
+                out = self.renderer.render(cur_cam)
+                out2 = self.renderer.render(cur_cam2)
+                out3 = self.renderer.render(cur_cam3)
+                out4 = self.renderer.render(cur_cam4)
+
+                # rgb loss
+                image = out["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
+                loss = loss + 10000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(image, self.input_img_torch)
+
+                # mask loss
+                mask = out["alpha"].unsqueeze(0) # [1, 1, H, W] in [0, 1]
+                loss = loss + 1000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(mask, self.input_mask_torch)
+
+                # rgb loss
+                image2 = out2["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
+                loss = loss + 10000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(image2, self.input_img_torch2)
+
+                # mask loss
+                mask2 = out2["alpha"].unsqueeze(0) # [1, 1, H, W] in [0, 1]
+                loss = loss + 1000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(mask2, self.input_mask_torch2)
+
+                # rgb loss
+                image3 = out3["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
+                loss = loss + 10000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(image3, self.input_img_torch3)
+
+                # mask loss
+                mask3 = out3["alpha"].unsqueeze(0) # [1, 1, H, W] in [0, 1]
+                loss = loss + 1000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(mask3, self.input_mask_torch3)
+
+                 # rgb loss
+                image4 = out4["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
+                loss = loss + 10000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(image4, self.input_img_torch4)
+
+                # mask loss
+                mask4 = out4["alpha"].unsqueeze(0) # [1, 1, H, W] in [0, 1]
+                loss = loss + 1000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(mask4, self.input_mask_torch4)
+
 
             ### novel view (manual batch)
             render_resolution = 128 if step_ratio < 0.3 else (256 if step_ratio < 0.6 else 512)
@@ -385,6 +404,7 @@ class GUI:
             if self.enable_zero123:
                 loss = loss + self.opt.lambda_zero123 * self.guidance_zero123.train_step(images, vers, hors, radii, step_ratio=step_ratio if self.opt.anneal_timestep else None, default_elevation=self.opt.elevation)
             
+            myLoss.append(loss)
             # optimize step
             loss.backward()
             self.optimizer.step()
@@ -401,7 +421,7 @@ class GUI:
                 
                 if self.step % self.opt.opacity_reset_interval == 0:
                     self.renderer.gaussians.reset_opacity()
-
+        print(loss)
         ender.record()
         torch.cuda.synchronize()
         t = starter.elapsed_time(ender)
@@ -490,11 +510,92 @@ class GUI:
             dpg.set_value(
                 "_texture", self.buffer_image
             )  # buffer must be contiguous, else seg fault!
+    def load_input4(self, file4):
+        # load image
+        print(f'[INFO] load image from {file4}...')
+        img4 = cv2.imread(file4, cv2.IMREAD_UNCHANGED)
+        if img4.shape[-1] == 3:
+            if self.bg_remover is None:
+                self.bg_remover = rembg.new_session()
+            img4 = rembg.remove(img4, session=self.bg_remover)
 
-    
+        img4 = cv2.resize(
+            img4, (self.W, self.H), interpolation=cv2.INTER_AREA
+        )
+        img4 = img4.astype(np.float32) / 255.0
+
+        self.input_mask4 = img4[..., 3:]
+        # white bg
+        self.input_img4 = img4[..., :3] * self.input_mask4 + (
+            1 - self.input_mask4
+        )
+        # bgr to rgb
+        self.input_img4 = self.input_img4[..., ::-1].copy()
+
+        # load prompt
+        file_prompt4 = file4.replace("_rgba.png", "_caption.txt")
+        if os.path.exists(file_prompt4):
+            print(f'[INFO] load prompt from {file_prompt4}...')
+            with open(file_prompt4, "r") as f:
+                self.prompt4 = f.read().strip()
+
+    def load_input3(self, file3):
+        # load image
+        print(f'[INFO] load image from {file3}...')
+        img3 = cv2.imread(file3, cv2.IMREAD_UNCHANGED)
+        if img3.shape[-1] == 3:
+            if self.bg_remover is None:
+                self.bg_remover = rembg.new_session()
+            img3 = rembg.remove(img3, session=self.bg_remover)
+
+        img3 = cv2.resize(
+            img3, (self.W, self.H), interpolation=cv2.INTER_AREA
+        )
+        img3 = img3.astype(np.float32) / 255.0
+
+        self.input_mask3 = img3[..., 3:]
+        # white bg
+        self.input_img3 = img3[..., :3] * self.input_mask3 + (
+            1 - self.input_mask3
+        )
+        # bgr to rgb
+        self.input_img3 = self.input_img3[..., ::-1].copy()
+
+        # load prompt
+        file_prompt3 = file3.replace("_rgba.png", "_caption.txt")
+        if os.path.exists(file_prompt3):
+            print(f'[INFO] load prompt from {file_prompt3}...')
+            with open(file_prompt3, "r") as f:
+                self.prompt3 = f.read().strip()
+
+    def load_input2(self, file2):
+        # load image
+        print(f'[INFO] load image from {file2}...')
+        img2 = cv2.imread(file2, cv2.IMREAD_UNCHANGED)
+        if img2.shape[-1] == 3:
+            if self.bg_remover is None:
+                self.bg_remover = rembg.new_session()
+            img2 = rembg.remove(img2, session=self.bg_remover)
+
+        img2 = cv2.resize(img2, (self.W, self.H), interpolation=cv2.INTER_AREA)
+        img2 = img2.astype(np.float32) / 255.0
+
+        self.input_mask2 = img2[..., 3:]
+        # white bg
+        self.input_img2 = img2[..., :3] * self.input_mask2 + (1 - self.input_mask2)
+        # bgr to rgb
+        self.input_img2 = self.input_img2[..., ::-1].copy()
+
+        # load prompt
+        file_prompt2 = file2.replace("_rgba.png", "_caption.txt")
+        if os.path.exists(file_prompt2):
+            print(f'[INFO] load prompt from {file_prompt2}...')
+            with open(file_prompt2, "r") as f:
+                self.prompt2 = f.read().strip()
+
     def load_input(self, file):
         # load image
-        #print(f'[INFO] load image from {file}...')
+        print(f'[INFO] load image from {file}...')
         img = cv2.imread(file, cv2.IMREAD_UNCHANGED)
         if img.shape[-1] == 3:
             if self.bg_remover is None:
