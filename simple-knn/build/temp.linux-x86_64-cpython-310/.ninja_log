@@ -1,10 +1,4 @@
 # ninja log v5
-1	8540	1727728580459009085	/data/home/fatou.diene/nf/dream_fa/simple-knn/build/temp.linux-x86_64-cpython-310/simple_knn.o	ec3a8da6804413a2
-0	18161	1727728590066858631	/data/home/fatou.diene/nf/dream_fa/simple-knn/build/temp.linux-x86_64-cpython-310/ext.o	b6f39d585ab12f31
-1	45881	1727728617782488784	/data/home/fatou.diene/nf/dream_fa/simple-knn/build/temp.linux-x86_64-cpython-310/spatial.o	12411ed0f15b49dc
-19	8694	1728310937997918096	/data/home/fatou.diene/nf/dream_fa/simple-knn/build/temp.linux-x86_64-cpython-310/simple_knn.o	e4c726ff73ad3401
-19	17840	1728310947137767738	/data/home/fatou.diene/nf/dream_fa/simple-knn/build/temp.linux-x86_64-cpython-310/ext.o	f54a0c96cc7230a2
-19	41276	1728310970577382981	/data/home/fatou.diene/nf/dream_fa/simple-knn/build/temp.linux-x86_64-cpython-310/spatial.o	4260c182516e326
-17	8281	1729699051343322136	/data/home/fatou.diene/nf/dream_fa/simple-knn/build/temp.linux-x86_64-cpython-310/simple_knn.o	e39f1be617a69649
-17	17701	1729699060747171413	/data/home/fatou.diene/nf/dream_fa/simple-knn/build/temp.linux-x86_64-cpython-310/ext.o	f54a0c96cc7230a2
-18	44055	1729699087106748960	/data/home/fatou.diene/nf/dream_fa/simple-knn/build/temp.linux-x86_64-cpython-310/spatial.o	f4ec6bea1428e973
+0	6892	1732548916952377680	/workspace/simple-knn/build/temp.linux-x86_64-cpython-310/simple_knn.o	cb8b3488ff58cc81
+0	9916	1732548919977377373	/workspace/simple-knn/build/temp.linux-x86_64-cpython-310/ext.o	51a612570f4715e3
+1	33246	1732548943311375009	/workspace/simple-knn/build/temp.linux-x86_64-cpython-310/spatial.o	d1a63c8d19fed778

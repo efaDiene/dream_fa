@@ -111,7 +111,7 @@ class GUI:
         self.last_seed = seed
 
     def load_input_from_transforms(self, transforms_file):
-        print(f'[INFO] Chargement des transformations depuis {transforms_file}...')
+        #print(f'[INFO] Chargement des transformations depuis {transforms_file}...')
         
         # Charger les transformations depuis le fichier JSON
         with open(transforms_file) as f:
@@ -122,11 +122,16 @@ class GUI:
 
         for i, frame in enumerate(data["frames"]):
             if frame["file_path"] in selected_images or i in selected_images:
-                image_path = frame["file_path"]
+                # Remplacer "images/" par "data/" dans le chemin du fichier
+                image_path = frame["file_path"].replace("images/", "data/")
+
+                # Modifier l'extension en .png
+                image_path = image_path.rsplit('.', 1)[0] + '.png'
+            
                 transform_matrix = np.array(frame["transform_matrix"])
 
                 # Calculer l'azimut et l'élévation à partir de la matrice de transformation
-                azimuth, elevation = self.calculate_azimuth_elevation(transform_matrix)
+                azimuth, elevation = self.extract_azimuth_elevation(transform_matrix)
 
                 # Ajouter "_rgba" au nom de fichier de l'image sélectionnée
                 rgba_image_path = self.add_rgba_suffix(image_path)
@@ -159,7 +164,24 @@ class GUI:
         
         return azimuth, elevation
     
+    def extract_azimuth_elevation(self, T):
+        # Matrice de rotation (3x3)
+        R = T[:3, :3]
+        
+        # Azimut (angle horizontal autour de l'axe z)
+        azimuth = np.arctan2(R[1, 0], R[0, 0])  # atan2(R[1, 0], R[0, 0])
+        
+        # Elévation (angle vertical autour de l'axe y)
+        elevation = np.arcsin(-R[2, 0])  # asin(-R[2, 0])
+        
+        # Conversion en degrés si nécessaire
+        azimuth_deg = np.rad2deg(azimuth)
+        elevation_deg = np.rad2deg(elevation)
+        
+        return azimuth_deg, elevation_deg 
+    
     def process_images_with_dreamgaussian(self):
+        totalLoss=0
         for image_data in self.images_data:
             image_path = image_data["image_path"]
             azimuth = image_data["azimuth"]
@@ -199,8 +221,10 @@ class GUI:
                 # Perte de masque
                 mask = out["alpha"].unsqueeze(0)  # [1, 1, H, W] dans [0, 1]
                 loss += 1000 * F.mse_loss(mask, self.input_mask_torch)
+                totalLoss += loss
 
-                print(f"Image traitée {image_path} avec perte: {loss.item()}")
+                #print(f"Image traitée {image_path} avec perte: {loss.item()}")
+        return totalLoss
 
 
     def prepare_train(self):
@@ -292,12 +316,12 @@ class GUI:
             # update lr
             self.renderer.gaussians.update_learning_rate(self.step)
 
-            loss = 0
+            #loss = 0
 
             ### known view
             ### Process images with DreamGaussian
             # Appel de la méthode pour traiter les images spécifiées
-            self.process_images_with_dreamgaussian()
+            loss=self.process_images_with_dreamgaussian()
 
             ### novel view (manual batch)
             render_resolution = 128 if step_ratio < 0.3 else (256 if step_ratio < 0.6 else 512)
@@ -470,7 +494,7 @@ class GUI:
     
     def load_input(self, file):
         # load image
-        print(f'[INFO] load image from {file}...')
+        #print(f'[INFO] load image from {file}...')
         img = cv2.imread(file, cv2.IMREAD_UNCHANGED)
         if img.shape[-1] == 3:
             if self.bg_remover is None:

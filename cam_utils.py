@@ -40,6 +40,24 @@ def look_at(campos, target, opengl=True):
     R = np.stack([right_vector, up_vector, forward_vector], axis=1)
     return R
 
+import numpy as np
+
+def extract_azimuth_elevation(T):
+    # Matrice de rotation (3x3)
+    R = T[:3, :3]
+    
+    # Azimut (angle horizontal autour de l'axe z)
+    azimuth = np.arctan2(R[1, 0], R[0, 0])  # atan2(R[1, 0], R[0, 0])
+    
+    # Elévation (angle vertical autour de l'axe y)
+    elevation = np.arcsin(-R[2, 0])  # asin(-R[2, 0])
+    
+    # Conversion en degrés si nécessaire
+    azimuth_deg = np.rad2deg(azimuth)
+    elevation_deg = np.rad2deg(elevation)
+    
+    return azimuth_deg, elevation_deg
+
 
 # elevation & azimuth to pose (cam2world) matrix
 def orbit_camera(elevation, azimuth, radius=1, is_degree=True, target=None, opengl=True):
