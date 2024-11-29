@@ -1,7 +1,7 @@
 ### Input
 # transforms.json file 
 transforms_file : "data/transforms.json"
-selected_images : ["data/00000021.jpg","data/00000007.jpg","data/00000041.jpg","data/00000116.jpg"]
+selected_images : ["images/00000021.jpg","images/00000007.jpg","images/00000041.jpg","images/00000116.jpg"]
 # input rgba image path (default to None, can be load in GUI too)
 input: 
 # input text prompt (default to None, can be input in GUI too)
