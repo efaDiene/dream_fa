@@ -1,7 +1,7 @@
 ### Input
 # input rgba image path (default to None, can be load in GUI too)
 input: 
-input2: "data/i00000116_rgba.png"
+input2: "data/i00000021_rgba.png" #"data/i00000116_rgba.png"
 input3: "data/i00000041_rgba.png"
 input4: "data/i00000007_rgba.png"
 # input text prompt (default to None, can be input in GUI too)

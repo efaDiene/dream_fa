@@ -1,0 +1,4 @@
+# ninja log v5
+0	6892	1732548916952377680	/workspace/simple-knn/build/temp.linux-x86_64-cpython-310/simple_knn.o	cb8b3488ff58cc81
+0	9916	1732548919977377373	/workspace/simple-knn/build/temp.linux-x86_64-cpython-310/ext.o	51a612570f4715e3
+1	33246	1732548943311375009	/workspace/simple-knn/build/temp.linux-x86_64-cpython-310/spatial.o	d1a63c8d19fed778

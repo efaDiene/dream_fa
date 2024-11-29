@@ -181,80 +181,121 @@ class GUI:
         distance = np.linalg.norm(position_camera)  # Distance à l'objet (supposé être à l'origine)
         return distance
 
-    def calculate_object_size(self, image, transform_matrix):
+    def calculate_object_scale_factor(self, image_data, reference_image_data):
         """
-        Estime la taille apparente de l'objet dans l'image en fonction de la matrice de transformation.
+        Calcule le facteur d'échelle entre l'objet dans une image donnée et l'objet dans l'image de référence.
+        
+        :param image_data: Données de l'image actuelle, y compris la matrice de transformation et le masque.
+        :param reference_image_data: Données de l'image de référence, y compris la matrice de transformation et le masque.
+        :return: Facteur d'échelle entre l'objet dans l'image et l'objet dans l'image de référence.
         """
-        # Par exemple, calculer la distance et estimer la taille
-        distance = self.calculate_distance_from_camera(transform_matrix)
+        # Extraire les matrices de transformation (T) pour les images actuelles et de référence
+        transform_matrix = image_data["transform_matrix"]
+        reference_transform_matrix = reference_image_data["transform_matrix"]
         
-        # Imaginons que tu connais la taille réelle de l'objet (par exemple, sa taille physique en mètres)
-        real_object_size = 1.0  # Taille réelle de l'objet (par exemple 1 mètre)
+        # Extraire les positions de la caméra pour les deux images (translation T)
+        camera_position = transform_matrix[:3, 3]  # Position de la caméra pour l'image actuelle
+        reference_camera_position = reference_transform_matrix[:3, 3]  # Position de la caméra pour l'image de référence
         
-        # Utiliser la distance pour calculer la taille apparente
-        apparent_object_size = real_object_size / distance * 1000  # Par exemple, taille en pixels à une certaine échelle
+        # Calculer la distance entre la caméra et l'objet dans l'image actuelle et de référence
+        distance = np.linalg.norm(camera_position)  # Norme de la translation pour la caméra actuelle
+        reference_distance = np.linalg.norm(reference_camera_position)  # Norme de la translation pour la caméra de référence
         
-        # Supposons que l'objet occupe une certaine proportion de l'image, tu peux calculer la taille de l'objet en pixels
-        image_height, image_width = image.shape[:2]
-        apparent_size_in_pixels = apparent_object_size * min(image_height, image_width) / 1000
+        # Calculer la taille apparente de l'objet dans l'image actuelle et de référence
+        object_mask = image_data["mask_path"]  # Charge ou utilise le masque pour l'objet dans l'image actuelle
+        reference_object_mask = reference_image_data["mask_path"]  # Charge ou utilise le masque pour l'objet dans l'image de référence
         
-        return apparent_size_in_pixels
+        object_size = self.calculate_object_size(object_mask)  # Estimer la taille de l'objet dans l'image actuelle (en pixels)
+        reference_object_size = self.calculate_object_size(reference_object_mask)  # Estimer la taille de l'objet dans l'image de référence (en pixels)
+        
+        # Calculer le facteur d'échelle en fonction de la distance et de la taille apparente
+        # Le facteur d'échelle est proportionnel à la distance et à la taille de l'objet
+        scale_factor = (reference_object_size * distance) / (object_size * reference_distance)
+        
+        return scale_factor
+    
+    def calculate_object_size(self, mask):
+        """
+        Calcule la taille apparente de l'objet dans l'image en utilisant son masque.
+        
+        :param mask_path: Le chemin du masque de l'objet dans l'image.
+        :return: Taille de l'objet en pixels.
+        """
+        # Charger l'image de masque
+        #mask = self.load_mask(mask_path)  # Assure-toi que cette fonction charge correctement ton masque
+        
+        # Calculer la taille de l'objet (nombre de pixels dans le masque)
+        object_size = np.sum(mask > 0)  # Compter les pixels non-nuls dans le masque (pour l'objet)
+        
+        return object_size
 
-    def adjust_image_scale(self, image, target_size, transform_matrix, reference_image_size):
+
+    def resize_object_in_image(self, image, scale_factor):
         """
-        Ajuste l'échelle de l'image pour que l'objet ait la même taille apparente que dans l'image de référence.
+        Redimensionne l'objet dans l'image en fonction du facteur d'échelle.
+        
+        :param image_path: Le chemin vers l'image contenant l'objet sans fond.
+        :param scale_factor: Le facteur d'échelle calculé pour ajuster la taille de l'objet.
+        :return: L'image modifiée avec l'objet redimensionné.
         """
-        # Calculer la taille apparente de l'objet dans l'image actuelle
-        current_image_size = self.calculate_object_size(image, transform_matrix)
+        # Si l'image a un canal alpha (transparence), séparer le canal alpha et l'image
+        if image.shape[2] == 4:  # L'image a un canal alpha
+            img_rgb = image[:, :, :3]  # Couleur (RGB)
+        else:
+            img_rgb = image
         
-        # Calculer le facteur de mise à l'échelle nécessaire pour ajuster la taille
-        scale_factor = reference_image_size / current_image_size
+        # Redimensionner l'objet en fonction du facteur d'échelle
+        resized_img_rgb = self.resize_region(img_rgb, scale_factor)
         
-        # Redimensionner l'image en fonction du facteur de mise à l'échelle
-        new_width = int(image.shape[1] * scale_factor)
-        new_height = int(image.shape[0] * scale_factor)
-        
-        # Utiliser OpenCV pour redimensionner l'image
-        resized_image = cv2.resize(image, (new_width, new_height))
-        
-        return resized_image
-    
-    def adjust_image_and_mask_scale(self, image, mask, target_size, transform_matrix, reference_image_size):
+        return resized_img_rgb
+
+    def resize_region(self, region, scale_factor):
         """
-        Ajuste l'échelle de l'image et du masque pour que l'objet ait la même taille apparente que dans l'image de référence.
+        Redimensionne une région de l'image (par exemple l'objet) en fonction du facteur d'échelle.
+        
+        :param region: La région (ou l'objet) de l'image à redimensionner.
+        :param scale_factor: Le facteur d'échelle pour ajuster la taille de l'objet.
+        :return: La région redimensionnée.
         """
-        # Calculer la taille apparente de l'objet dans l'image actuelle
-        current_image_size = self.calculate_object_size(image, transform_matrix)
+        # Obtenir les dimensions de la région
+        height, width = region.shape[:2]
         
-        # Calculer le facteur de mise à l'échelle nécessaire pour ajuster la taille
-        scale_factor = reference_image_size / current_image_size
+        # Calculer les nouvelles dimensions en fonction du facteur d'échelle
+        new_height = int(height * scale_factor)
+        new_width = int(width * scale_factor)
         
-        # Redimensionner l'image en fonction du facteur de mise à l'échelle
-        new_width = int(image.shape[1] * scale_factor)
-        new_height = int(image.shape[0] * scale_factor)
+        # Redimensionner la région
+        resized_region = cv2.resize(region, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+        return resized_region
+
+    # Redimensionner l'objet dans l'image
+
         
-        # Utiliser OpenCV pour redimensionner l'image
-        resized_image = cv2.resize(image, (new_width, new_height))
-        
-        # Redimensionner le masque de manière identique
-        resized_mask = cv2.resize(mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST)  # Utilisation de l'interpolation nearest pour le masque
-        
-        return resized_image, resized_mask
-    
     def process_images_with_dreamgaussian(self):
         loss=0
         # Calculer la taille apparente de l'objet dans l'image de référence
         image_path = self.images_data[0]["image_path"]
         self.load_input(image_path)
         reference_image_transform_matrix = np.array(self.images_data[0]["transform_matrix"])
-        reference_image_size = self.calculate_object_size(self.input_img, reference_image_transform_matrix)
+        reference_camera_position = reference_image_transform_matrix[:3, 3]
+        reference_distance = np.linalg.norm(reference_camera_position)
+        reference_object_mask = self.input_mask
+        reference_object_size = self.calculate_object_size(reference_object_mask)
 
         for image_data in self.images_data:
             image_path = image_data["image_path"]
             azimuth = image_data["azimuth"]
             elevation = image_data["elevation"]
             transform_matrix = image_data["transform_matrix"]
+
+            camera_position = transform_matrix[:3, 3]
+            distance = np.linalg.norm(camera_position)
+            object_mask = self.input_mask
+            object_size = self.calculate_object_size(object_mask)
             #mask = image_data["mask"]  # Récupérer le masque associé
+
+            scale_factor = (reference_object_size * distance) / (object_size * reference_distance)
+            print(scale_factor)
 
             # Utiliser l'azimut et l'élévation pour définir le pose de la caméra
             pose = orbit_camera(elevation, azimuth, self.opt.radius)
@@ -263,11 +304,15 @@ class GUI:
             # Charger l'image d'entrée (si elle n'est pas déjà chargée)
             self.load_input(image_path)
             
+            
 
             if self.input_img is not None:
+                new_width = int(self.input_img.shape[1] / scale_factor)  # Diviser par le facteur d'échelle
+                new_height = int(self.input_img.shape[0] / scale_factor)  # Diviser par le facteur d'échelle
+                
                 # Ajuster l'échelle de l'image pour qu'elle corresponde à la taille apparente de l'objet dans l'image de référence
-                adjusted_image = self.adjust_image_scale(self.input_img, reference_image_size, transform_matrix, reference_image_size)                # Convertir l'image ajustée pour traitement
-                self.input_img_torch = torch.from_numpy(adjusted_image).permute(2, 0, 1).unsqueeze(0).to(self.device)
+                resized_image = cv2.resize(self.input_img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)                
+                self.input_img_torch = torch.from_numpy(resized_image).permute(2, 0, 1).unsqueeze(0).to(self.device)
                 self.input_img_torch = F.interpolate(self.input_img_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
 
                 self.input_mask_torch = torch.from_numpy(self.input_mask).permute(2, 0, 1).unsqueeze(0).to(self.device)
@@ -520,7 +565,7 @@ class GUI:
     
     def load_input(self, file):
         # load image
-        print(f'[INFO] load image from {file}...')
+        #print(f'[INFO] load image from {file}...')
         img = cv2.imread(file, cv2.IMREAD_UNCHANGED)
         if img.shape[-1] == 3:
             if self.bg_remover is None:
