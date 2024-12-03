@@ -40,8 +40,6 @@ def look_at(campos, target, opengl=True):
     R = np.stack([right_vector, up_vector, forward_vector], axis=1)
     return R
 
-import numpy as np
-
 def extract_azimuth_elevation(T):
     # Matrice de rotation (3x3)
     R = T[:3, :3]

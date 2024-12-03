@@ -180,18 +180,29 @@ class GUI:
         
         return azimuth_deg, elevation_deg 
     
+    def visualize_alignment(self, input_img, rendered_img):
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(input_img)
+        plt.title("Image d'entrée")
+        plt.subplot(1, 2, 2)
+        plt.imshow(rendered_img)
+        plt.title("Image rendue")
+        plt.show()
+    
     def process_images_with_dreamgaussian(self):
         totalLoss=0
         for image_data in self.images_data:
             image_path = image_data["image_path"]
             azimuth = image_data["azimuth"]
             elevation = image_data["elevation"]
-            transform_matrix = image_data["transform_matrix"]
+            transform_matrix = np.array(image_data["transform_matrix"],dtype=np.float32)
 
             # Utiliser l'azimut et l'élévation pour définir le pose de la caméra
             pose = orbit_camera(elevation, azimuth, self.opt.radius)
             self.fixed_cam = MiniCam(
-                pose,
+                transform_matrix,
                 self.opt.ref_size,
                 self.opt.ref_size,
                 self.cam.fovy,
@@ -199,7 +210,7 @@ class GUI:
                 self.cam.near,
                 self.cam.far,
             )
-            self.pose2.append(pose)
+            self.pose2.append(transform_matrix)
             # Charger l'image d'entrée (si elle n'est pas déjà chargée)
             self.load_input(image_path)
 
@@ -213,6 +224,9 @@ class GUI:
                 # Rendu et calcul de la perte pour l'image actuelle
                 cur_cam = self.fixed_cam
                 out = self.renderer.render(cur_cam)
+                rendered_img = out["image"].cpu().detach().numpy().transpose(1, 2, 0)  # [H, W, 3]
+                if (self.train_steps>= 450):
+                    self.visualize_alignment(self.input_img, rendered_img)
 
                 # Perte RGB
                 image = out["image"].unsqueeze(0)  # [1, 3, H, W] dans [0, 1]
@@ -355,6 +369,14 @@ class GUI:
 
                 image = out["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
                 images.append(image)
+                image2 = image.squeeze(0)  # Passer de [1, 3, H, W] à [3, H, W]
+                image2 = image2.permute(1, 2, 0)  # Passer de [3, H, W] à [H, W, 3]
+
+                # Assurez-vous que les valeurs sont entre 0 et 255 (pour l'image RGB)
+                image2 = (image2 * 255).clamp(0, 255).byte()  # Normaliser et convertir en entier
+
+                # Enregistrer l'image avec OpenCV
+                cv2.imwrite('output_image_opencv.jpg', image2.cpu().numpy())
 
                 # enable mvdream training
                 if self.opt.mvdream or self.opt.imagedream:

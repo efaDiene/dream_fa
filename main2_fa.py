@@ -311,6 +311,14 @@ class GUI:
                 image = image.permute(2,0,1).contiguous().unsqueeze(0) # [1, 3, H, W] in [0, 1]
 
                 images.append(image)
+                image2 = image.squeeze(0)  # Passer de [1, 3, H, W] à [3, H, W]
+                image2 = image2.permute(1, 2, 0)  # Passer de [3, H, W] à [H, W, 3]
+
+                # Assurez-vous que les valeurs sont entre 0 et 255 (pour l'image RGB)
+                image2 = (image2 * 255).clamp(0, 255).byte()  # Normaliser et convertir en entier
+
+                # Enregistrer l'image avec OpenCV
+                cv2.imwrite('output_image_opencv3.jpg', image2.cpu().numpy())
 
                 # enable mvdream training
                 if self.opt.mvdream or self.opt.imagedream:
