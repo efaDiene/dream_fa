@@ -372,6 +372,14 @@ class GUI:
 
                 image = out["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
                 images.append(image)
+                image2 = image.squeeze(0)  # Passer de [1, 3, H, W] à [3, H, W]
+                image2 = image2.permute(1, 2, 0)  # Passer de [3, H, W] à [H, W, 3]
+
+                # Assurez-vous que les valeurs sont entre 0 et 255 (pour l'image RGB)
+                image2 = (image2 * 255).clamp(0, 255).byte()  # Normaliser et convertir en entier
+
+                # Enregistrer l'image avec OpenCV
+                cv2.imwrite('output_image_opencv.jpg', image2.cpu().numpy())
 
                 # enable mvdream training
                 if self.opt.mvdream or self.opt.imagedream:
@@ -421,7 +429,7 @@ class GUI:
                 
                 if self.step % self.opt.opacity_reset_interval == 0:
                     self.renderer.gaussians.reset_opacity()
-        print(loss)
+        #print(loss)
         ender.record()
         torch.cuda.synchronize()
         t = starter.elapsed_time(ender)
@@ -512,7 +520,7 @@ class GUI:
             )  # buffer must be contiguous, else seg fault!
     def load_input4(self, file4):
         # load image
-        print(f'[INFO] load image from {file4}...')
+        #print(f'[INFO] load image from {file4}...')
         img4 = cv2.imread(file4, cv2.IMREAD_UNCHANGED)
         if img4.shape[-1] == 3:
             if self.bg_remover is None:
@@ -541,7 +549,7 @@ class GUI:
 
     def load_input3(self, file3):
         # load image
-        print(f'[INFO] load image from {file3}...')
+        #print(f'[INFO] load image from {file3}...')
         img3 = cv2.imread(file3, cv2.IMREAD_UNCHANGED)
         if img3.shape[-1] == 3:
             if self.bg_remover is None:
@@ -570,7 +578,7 @@ class GUI:
 
     def load_input2(self, file2):
         # load image
-        print(f'[INFO] load image from {file2}...')
+        #print(f'[INFO] load image from {file2}...')
         img2 = cv2.imread(file2, cv2.IMREAD_UNCHANGED)
         if img2.shape[-1] == 3:
             if self.bg_remover is None:
@@ -595,7 +603,7 @@ class GUI:
 
     def load_input(self, file):
         # load image
-        print(f'[INFO] load image from {file}...')
+        #print(f'[INFO] load image from {file}...')
         img = cv2.imread(file, cv2.IMREAD_UNCHANGED)
         if img.shape[-1] == 3:
             if self.bg_remover is None:
