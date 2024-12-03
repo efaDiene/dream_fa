@@ -191,7 +191,7 @@ class GUI:
         plt.title("Image rendue")
         plt.show()
     
-    def process_images_with_dreamgaussian(self):
+    def process_images_with_dreamgaussian(self,step):
         totalLoss=0
         for image_data in self.images_data:
             image_path = image_data["image_path"]
@@ -225,7 +225,7 @@ class GUI:
                 cur_cam = self.fixed_cam
                 out = self.renderer.render(cur_cam)
                 rendered_img = out["image"].cpu().detach().numpy().transpose(1, 2, 0)  # [H, W, 3]
-                if (self.train_steps>= 450):
+                if (step>= 450):
                     self.visualize_alignment(self.input_img, rendered_img)
 
                 # Perte RGB
@@ -322,7 +322,7 @@ class GUI:
         ender = torch.cuda.Event(enable_timing=True)
         starter.record()
 
-        for _ in range(self.train_steps):
+        for step in range(self.train_steps):
 
             self.step += 1
             step_ratio = min(1, self.step / self.opt.iters)
@@ -336,7 +336,7 @@ class GUI:
             ### Process images with DreamGaussian
             # Appel de la méthode pour traiter les images spécifiées
             self.pose2=[]
-            loss=self.process_images_with_dreamgaussian()
+            loss=self.process_images_with_dreamgaussian(step)
             np.save('extrinsicsZ2.npy', np.array(self.pose2, dtype=np.float64))
 
             ### novel view (manual batch)
