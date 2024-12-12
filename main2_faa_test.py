@@ -288,18 +288,28 @@ class GUI:
             elevation = image_data["elevation"]
             transform_matrix = np.array(image_data["transform_matrix"],dtype=np.float32)
 
-            camera_position = transform_matrix[:3, 3]
+            """ camera_position = transform_matrix[:3, 3]
             distance = np.linalg.norm(camera_position)
             object_mask = self.input_mask
             object_size = self.calculate_object_size(object_mask)
             #mask = image_data["mask"]  # Récupérer le masque associé
 
             scale_factor = (reference_object_size * distance) / (object_size * reference_distance)
-            print(scale_factor)
+            print(scale_factor) """
+            R = transform_matrix[:3, :3]  
+            t = transform_matrix[:3, 3]   
+
+            # Calculer la position de la caméra dans le repère monde
+            camera_position_world = -np.dot(R.T, t)
+
+            # Point dans le repère monde 
+            point_world = np.array([0,0,0]) 
+            # Calculer la distance entre le point et la caméra
+            rayon = np.linalg.norm(point_world - camera_position_world)
 
             # Utiliser l'azimut et l'élévation pour définir le pose de la caméra
             pose = orbit_camera(elevation, azimuth, self.opt.radius)
-            self.fixed_cam = (transform_matrix, self.cam.perspective)
+            self.fixed_cam = (pose, self.cam.perspective)
 
             # Charger l'image d'entrée (si elle n'est pas déjà chargée)
             self.load_input(image_path)
@@ -307,12 +317,12 @@ class GUI:
             
 
             if self.input_img is not None:
-                new_width = int(self.input_img.shape[1] / scale_factor)  # Diviser par le facteur d'échelle
-                new_height = int(self.input_img.shape[0] / scale_factor)  # Diviser par le facteur d'échelle
+                #new_width = int(self.input_img.shape[1] / scale_factor)  # Diviser par le facteur d'échelle
+                #new_height = int(self.input_img.shape[0] / scale_factor)  # Diviser par le facteur d'échelle
                 
                 # Ajuster l'échelle de l'image pour qu'elle corresponde à la taille apparente de l'objet dans l'image de référence
-                resized_image = cv2.resize(self.input_img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)                
-                self.input_img_torch = torch.from_numpy(resized_image).permute(2, 0, 1).unsqueeze(0).to(self.device)
+                #resized_image = cv2.resize(self.input_img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)                
+                self.input_img_torch = torch.from_numpy(self.input_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
                 self.input_img_torch = F.interpolate(self.input_img_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
 
                 self.input_mask_torch = torch.from_numpy(self.input_mask).permute(2, 0, 1).unsqueeze(0).to(self.device)

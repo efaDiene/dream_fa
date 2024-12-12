@@ -4,6 +4,7 @@ transforms_file : "data/transforms.json"
 selected_images : ["images/00000021.jpg","images/00000007.jpg","images/00000041.jpg","images/00000116.jpg"]
 # input rgba image path (default to None, can be load in GUI too)
 input: 
+input2: "data/i00000116.jpg"
 # input text prompt (default to None, can be input in GUI too)
 prompt:
 negative_prompt:
@@ -12,7 +13,8 @@ mesh:
 # estimated elevation angle for input image 
 elevation: 0
 # reference image resolution
-ref_size: 1024
+ref_size: 1024 #1440
+ref_size2: 1024 #1920
 # density thresh for mesh extraction
 density_thresh: 1
 
@@ -34,14 +36,14 @@ lambda_zero123: 1
 # warmup rgb supervision for image-to-3d
 warmup_rgb_loss: True
 # training batch size per iter
-batch_size: 1
+batch_size: 16
 
 # training iterations for stage 1
 iters: 500
 # whether to linearly anneal timestep
 anneal_timestep: True
 # training iterations for stage 2
-iters_refine: 50
+iters_refine: 100
 # training camera radius
 radius: 2
 # training camera fovy
@@ -51,7 +53,7 @@ min_ver: -30
 # training camera max elevation
 max_ver: 30
 # checkpoint to load for stage 1 (should be a ply file)
-load:
+load:  #"logs/points3D.ply"   #"logs/i00000007_model.ply"
 # whether allow geom training in stage 2
 train_geo: False
 # prob to invert background color during training (0 = always black, 1 = always white)
@@ -66,7 +68,7 @@ H: 800
 W: 800
 
 ### Gaussian splatting
-num_pts: 10000
+num_pts: 5000
 sh_degree: 0
 position_lr_init: 0.001
 position_lr_final: 0.00002
@@ -78,7 +80,7 @@ scaling_lr: 0.005
 rotation_lr: 0.005
 percent_dense: 0.01
 density_start_iter: 100
-density_end_iter: 5000
+density_end_iter: 900
 densification_interval: 100
 opacity_reset_interval: 700
 densify_grad_threshold: 0.01

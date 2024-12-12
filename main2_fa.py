@@ -116,6 +116,47 @@ class GUI:
 
         self.last_seed = seed
 
+    def padding(self, img):
+        h,w = img.shape[:2]
+        if h != w:
+            max_edge = max(h,w)
+            x_center = (max_edge - w) // 2
+            y_center = (max_edge - h) // 2
+
+
+            if len(img.shape) == 3:
+                c = img.shape[2]
+                padding_img = np.ones((max_edge,max_edge,c))
+                padding_img[y_center:y_center + h, x_center:x_center + w, :] = img
+            else:
+                padding_img = np.ones((max_edge,max_edge))
+                padding_img[y_center:y_center+h, x_center:x_center+w] = img
+            img = padding_img
+        return img
+
+    def generate_box(self, input_mask):
+        # generate bbox
+        # input_mask = img[..., 3:]
+        rows = np.any(input_mask, axis=1)
+        cols = np.any(input_mask, axis=0)
+        row_min, row_max = np.where(rows)[0][[0, -1]]
+        col_min, col_max = np.where(cols)[0][[0, -1]]
+
+        # Create the bounding box (top-left and bottom-right coordinates)
+        bbox = [col_min, row_min, col_max, row_max]
+
+        return bbox
+    
+    def recenter(self, img, bbox, width, height):
+        bbox_center_x = (bbox[0] + bbox[2]) / 2
+        bbox_center_y = (bbox[1] + bbox[3]) / 2
+        img_center_x, img_center_y = width / 2, height / 2
+        shift_x = img_center_x - bbox_center_x
+        shift_y = img_center_y - bbox_center_y
+        M = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
+        img = cv2.warpAffine(img, M, (width, height))
+        return img
+
     def prepare_train(self):
 
         self.step = 0
@@ -128,15 +169,16 @@ class GUI:
             # the second view is the front view for mvdream/imagedream.
             pose = orbit_camera(self.opt.elevation, 90, self.opt.radius)
         else:
-            T1=np.array([[0.9914812005580562,0.042540294266794725,0.123107076578277,0.6403368589861457],
-                        [0.11213179160333159,0.20209900326198604,-0.9729246909151492,-4.404663066986293],
-                        [-0.06626832012192753, 0.9784407576568989,0.19560724297431184, 0.6280872478304493],
-                        [0.0,0.0,0.0,1.0]])
+            T1=np.array([[0.9958024195334342,-0.018871573594701076,0.0895622965394354,1.0876262766729021],
+                        [0.09136257244450904,0.1459772386914313,-0.9850601637160781,-4.289772970297661],
+                        [0.0055155786350863335,0.9891079362203522,0.1470886429954247,0.6471367509962119],
+                        [0.0, 0.0,0.0, 1.0]])
 
-            T2=np.array([[-0.9335272160259617,-0.08374497370326199,0.3485881758153263,1.4731692667487262],
-                        [ 0.3585027317564034,-0.21358420616106197,0.9087670648751225, 3.2469174661061526],
-                        [-0.0016517451417085618, 0.9733286013767337, 0.22940947120813876,0.6718663410212528],
-                        [0.0,0.0,0.0,1.0]])
+            T2=np.array([[-0.7255133758153133, 0.16008781379961542,-0.669329689604404,  -3.5211266181713743],
+                        [-0.6882000612020779,-0.16407294163500233,0.7067253678655477, 2.7937770033229232 ],
+                        [ 0.003319228001286951, 0.9733714407645709, 0.2292095570201615, 0.6019382195158107 ], 
+                        [0.0, 0.0, 0.0,1.0]]
+  )
             T3=np.array([[-0.6746754311116187,-0.08681601004864213,0.7329911616476597,3.2015423336685735 ],
                         [0.736727706605517,-0.14005170023378533, 0.6615268759327932,2.5178358588686636],
                         [0.04522553453666382, 0.9863308276946736, 0.15844920121292183,0.6379604279301839 ],
@@ -150,11 +192,10 @@ class GUI:
             azimuth3, elevation3=extract_azimuth_elevation(T3)
             azimuth4, elevation4=extract_azimuth_elevation(T4)
             #pose = orbit_camera(self.opt.elevation, 0, self.opt.radius)
-            pose = orbit_camera(elevation1, azimuth1, self.opt.radius)
-            pose2 = orbit_camera(elevation2, azimuth2, self.opt.radius)
-            pose3 = orbit_camera(elevation3, azimuth3, self.opt.radius)
-            pose4 = orbit_camera(elevation4, azimuth4, self.opt.radius)
-
+            pose = orbit_camera( elevation1, azimuth1 , self.opt.radius)
+            pose2 = orbit_camera(elevation2, azimuth2 -azimuth1, self.opt.radius)
+            pose3 = orbit_camera(elevation3, azimuth3 -azimuth1, self.opt.radius)
+            pose4 = orbit_camera(elevation4, azimuth4 -azimuth1 , self.opt.radius)  
         self.fixed_cam = (pose, self.cam.perspective)
         self.fixed_cam2 = (pose2, self.cam.perspective)
         self.fixed_cam3 = (pose3, self.cam.perspective)
@@ -201,6 +242,7 @@ class GUI:
             self.input_img_torch_channel_last = self.input_img_torch[0].permute(1,2,0).contiguous()
 
             #input2
+        if self.opt.input2 is not None:
             self.input_img_torch2 = torch.from_numpy(self.input_img2).permute(2, 0, 1).unsqueeze(0).to(self.device)
             self.input_img_torch2 = F.interpolate(self.input_img_torch2, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
 
@@ -209,6 +251,7 @@ class GUI:
             self.input_img_torch_channel_last2 = self.input_img_torch2[0].permute(1,2,0).contiguous()
 
             #input3
+        if self.opt.input3 is not None:
             self.input_img_torch3 = torch.from_numpy(self.input_img3).permute(2, 0, 1).unsqueeze(0).to(self.device)
             self.input_img_torch3 = F.interpolate(self.input_img_torch3, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
 
@@ -217,6 +260,7 @@ class GUI:
             self.input_img_torch_channel_last3 = self.input_img_torch3[0].permute(1,2,0).contiguous()
 
             #input4
+        if self.opt.input4 is not None:
             self.input_img_torch4 = torch.from_numpy(self.input_img4).permute(2, 0, 1).unsqueeze(0).to(self.device)
             self.input_img_torch4 = F.interpolate(self.input_img_torch4, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
 
@@ -266,16 +310,20 @@ class GUI:
                 valid_mask = ((out["alpha"] > 0) & (out["viewcos"] > 0.5)).detach()
                 loss = loss + F.mse_loss(image * valid_mask, self.input_img_torch_channel_last * valid_mask)
 
+                
+            if self.opt.input2 is not None:
                 # rgb loss
                 image2 = out2["image"] # [H, W, 3] in [0, 1]
                 valid_mask2 = ((out2["alpha"] > 0) & (out2["viewcos"] > 0.5)).detach()
                 loss = loss + F.mse_loss(image2 * valid_mask2, self.input_img_torch_channel_last2 * valid_mask2)
 
+            if self.opt.input3 is not None:
                 # rgb loss
                 image3 = out3["image"] # [H, W, 3] in [0, 1]
                 valid_mask3 = ((out3["alpha"] > 0) & (out3["viewcos"] > 0.5)).detach()
                 loss = loss + F.mse_loss(image3 * valid_mask3, self.input_img_torch_channel_last3 * valid_mask3)
 
+            if self.opt.input4 is not None:
                 # rgb loss
                 image4 = out4["image"] # [H, W, 3] in [0, 1]
                 valid_mask4 = ((out4["alpha"] > 0) & (out4["viewcos"] > 0.5)).detach()
@@ -428,35 +476,6 @@ class GUI:
                 "_texture", self.buffer_image
             )  # buffer must be contiguous, else seg fault!
 
-    def load_input4(self, file4):
-        # load image
-        print(f'[INFO] load image from {file4}...')
-        img4 = cv2.imread(file4, cv2.IMREAD_UNCHANGED)
-        if img4.shape[-1] == 3:
-            if self.bg_remover is None:
-                self.bg_remover = rembg.new_session()
-            img4 = rembg.remove(img4, session=self.bg_remover)
-
-        img4 = cv2.resize(
-            img4, (self.W, self.H), interpolation=cv2.INTER_AREA
-        )
-        img4 = img4.astype(np.float32) / 255.0
-
-        self.input_mask4 = img4[..., 3:]
-        # white bg
-        self.input_img4 = img4[..., :3] * self.input_mask4 + (
-            1 - self.input_mask4
-        )
-        # bgr to rgb
-        self.input_img4 = self.input_img4[..., ::-1].copy()
-
-        # load prompt
-        file_prompt4 = file4.replace("_rgba.png", "_caption.txt")
-        if os.path.exists(file_prompt4):
-            print(f'[INFO] load prompt from {file_prompt4}...')
-            with open(file_prompt4, "r") as f:
-                self.prompt4 = f.read().strip()
-
     def load_input3(self, file3):
         # load image
         print(f'[INFO] load image from {file3}...')
@@ -466,25 +485,25 @@ class GUI:
                 self.bg_remover = rembg.new_session()
             img3 = rembg.remove(img3, session=self.bg_remover)
 
-        img3 = cv2.resize(
-            img3, (self.W, self.H), interpolation=cv2.INTER_AREA
-        )
+        #img3 = cv2.resize(img3, (self.W, self.H), interpolation=cv2.INTER_AREA)
+        img3 = self.padding(img3)
         img3 = img3.astype(np.float32) / 255.0
 
+        #self.input_mask3 = img3[..., 3:]
+        mask = img3[..., -1] > 0
+        # white bg
+        #bbox = self.generate_box(mask)
+        height, width = img3.shape[:2]
+        #carved_image = self.recenter(img3, bbox, width, height)
+        #carved_image = self.padding(carved_image)
+
+        
         self.input_mask3 = img3[..., 3:]
         # white bg
-        self.input_img3 = img3[..., :3] * self.input_mask3 + (
-            1 - self.input_mask3
-        )
+        self.input_img3 = img3[..., :3] * self.input_mask3 + (1 - self.input_mask3)
         # bgr to rgb
         self.input_img3 = self.input_img3[..., ::-1].copy()
 
-        # load prompt
-        file_prompt3 = file3.replace("_rgba.png", "_caption.txt")
-        if os.path.exists(file_prompt3):
-            print(f'[INFO] load prompt from {file_prompt3}...')
-            with open(file_prompt3, "r") as f:
-                self.prompt3 = f.read().strip()
 
     def load_input2(self, file2):
         # load image
@@ -495,23 +514,24 @@ class GUI:
                 self.bg_remover = rembg.new_session()
             img2 = rembg.remove(img2, session=self.bg_remover)
 
-        img2 = cv2.resize(img2, (self.W, self.H), interpolation=cv2.INTER_AREA)
+        #img2 = cv2.resize(img2, (self.W, self.H), interpolation=cv2.INTER_AREA)
+        img2 = self.padding(img2)
         img2 = img2.astype(np.float32) / 255.0
 
+        #self.input_mask2 = img2[..., 3:]
+        mask = img2[..., -1] > 0
+        # white bg
+        #bbox = self.generate_box(mask)
+        height, width = img2.shape[:2]
+        #carved_image = self.recenter(img2, bbox, width, height)
+        #carved_image = self.padding(carved_image)
+        
         self.input_mask2 = img2[..., 3:]
         # white bg
         self.input_img2 = img2[..., :3] * self.input_mask2 + (1 - self.input_mask2)
         # bgr to rgb
         self.input_img2 = self.input_img2[..., ::-1].copy()
 
-        # load prompt
-        file_prompt2 = file2.replace("_rgba.png", "_caption.txt")
-        if os.path.exists(file_prompt2):
-            print(f'[INFO] load prompt from {file_prompt2}...')
-            with open(file_prompt2, "r") as f:
-                self.prompt2 = f.read().strip()
-
-    
     def load_input(self, file):
         # load image
         print(f'[INFO] load image from {file}...')
@@ -521,26 +541,25 @@ class GUI:
                 self.bg_remover = rembg.new_session()
             img = rembg.remove(img, session=self.bg_remover)
 
-        img = cv2.resize(
-            img, (self.W, self.H), interpolation=cv2.INTER_AREA
-        )
+        #img = cv2.resize(img, (self.W, self.H), interpolation=cv2.INTER_AREA)
+        img = self.padding(img)
         img = img.astype(np.float32) / 255.0
+
+        #self.input_mask = img[..., 3:]
+        mask = img[..., -1] > 0
+        # white bg
+        #bbox = self.generate_box(mask)
+        height, width = img.shape[:2]
+        #carved_image = self.recenter(img, bbox, width, height)
+        #carved_image = self.padding(carved_image)
 
         self.input_mask = img[..., 3:]
         # white bg
-        self.input_img = img[..., :3] * self.input_mask + (
-            1 - self.input_mask
-        )
+        self.input_img = img[..., :3] * self.input_mask + (1 - self.input_mask)
         # bgr to rgb
         self.input_img = self.input_img[..., ::-1].copy()
 
-        # load prompt
-        file_prompt = file.replace("_rgba.png", "_caption.txt")
-        if os.path.exists(file_prompt):
-            print(f'[INFO] load prompt from {file_prompt}...')
-            with open(file_prompt, "r") as f:
-                self.prompt = f.read().strip()
-    
+
     def save_model(self):
         os.makedirs(self.opt.outdir, exist_ok=True)
     

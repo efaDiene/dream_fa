@@ -10,9 +10,10 @@ import torch
 import torch.nn.functional as F
 
 import rembg
+import transforms3d
 
 from cam_utils import orbit_camera, OrbitCamera
-from gs_renderer import Renderer, MiniCam
+from gs_renderer import Renderer, MiniCam, MiniCam2
 
 from grid_put import mipmap_linear_grid_put_2d
 from mesh import Mesh, safe_normalize
@@ -54,6 +55,8 @@ class GUI:
         self.overlay_input_img_ratio = 0.5
 
         self.images_data = []  # To store the data for each image
+        self.tran_mat_to_save = []
+        self.pose_to_save = []
 
         # Load input data from transforms.json
         if self.opt.transforms_file is not None:
@@ -180,16 +183,60 @@ class GUI:
         
         return azimuth_deg, elevation_deg 
     
+    def visualize_alignment(self, input_img, rendered_img):
+        import matplotlib
+        matplotlib.use('TKAgg')
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(input_img)
+        plt.title("Image d'entrée")
+        plt.subplot(1, 2, 2)
+        plt.imshow(rendered_img)
+        plt.title("Image rendue")
+        plt.show()
+    
+    def normalize_camera_pose(self, pose, radius):
+        # pose: Matrice 4x4 actuelle
+        # radius: Distance fixe caméra-objet
+        cam_position = pose[:3, 3]  # Extraire la position de la caméra
+        direction = cam_position / np.linalg.norm(cam_position)  # Normaliser
+        new_cam_position = direction * radius  # Ajuster au rayon fixe
+        pose[:3, 3] = new_cam_position  # Mettre à jour la position dans la pose
+        return pose
+    
     def process_images_with_dreamgaussian(self):
         totalLoss=0
         for image_data in self.images_data:
             image_path = image_data["image_path"]
             azimuth = image_data["azimuth"]
             elevation = image_data["elevation"]
-            transform_matrix = image_data["transform_matrix"]
-
+            transform_matrix = np.array(image_data["transform_matrix"],dtype=np.float32)
+            self.tran_mat_to_save.append(transform_matrix)
             # Utiliser l'azimut et l'élévation pour définir le pose de la caméra
+            #R = transform_matrix[:3, :3]  
+            #t = transform_matrix[:3, 3]   
+
+            # Calculer la position de la caméra dans le repère monde
+            #camera_position_world = -np.dot(R.T, t)
+
+            # Calculer la norme de t
+            #self.rayon = np.linalg.norm(t)
+            #print(self.rayon)
+
+            # Point dans le repère monde (exemple)
+            #point_world = np.array([0,0,0]) 
+            # Calculer la distance entre le point et la caméra
+            #self.rayon = np.linalg.norm(point_world - camera_position_world)
+            #print(self.rayon)
+            #tr_Rx180 = np.eye(4)
+            #tr_Rx180[:3, :3] = transforms3d.euler.euler2mat(np.pi, 0.0, 0.0)
+            #transform_matrix = transform_matrix @ tr_Rx180
+            #transform_matrix = np.array(transform_matrix,dtype=np.float32)
+
             pose = orbit_camera(elevation, azimuth, self.opt.radius)
+            #self.pose_to_save.append(pose)
+            #pose = self.normalize_camera_pose(pose, self.opt.radius)
             self.fixed_cam = MiniCam(
                 pose,
                 self.opt.ref_size,
@@ -213,14 +260,29 @@ class GUI:
                 # Rendu et calcul de la perte pour l'image actuelle
                 cur_cam = self.fixed_cam
                 out = self.renderer.render(cur_cam)
+                self.out=out
 
+                """ rendered_img = out["image"].cpu().detach().numpy().transpose(1, 2, 0)  # [H, W, 3]
+                if (self.step== 100):
+                    self.visualize_alignment(self.input_img, rendered_img)
+ """
                 # Perte RGB
                 image = out["image"].unsqueeze(0)  # [1, 3, H, W] dans [0, 1]
-                loss = F.mse_loss(image, self.input_img_torch)
+                loss = 10000 + F.mse_loss(image, self.input_img_torch)
+                """ image2 = image.squeeze(0)  # Passer de [1, 3, H, W] à [3, H, W]
+                image2 = image2.permute(1, 2, 0)  # Passer de [3, H, W] à [H, W, 3]
+
+                # Assurez-vous que les valeurs sont entre 0 et 255 (pour l'image RGB)
+                image2 = (image2 * 255).clamp(0, 255).byte()  # Normaliser et convertir en entier
+
+                # Enregistrer l'image avec OpenCV
+                path=f"output_{image_path}_{'image.jpg'}"
+                cv2.imwrite(path, image2.cpu().numpy())
+                 """
 
                 # Perte de masque
                 mask = out["alpha"].unsqueeze(0)  # [1, 1, H, W] dans [0, 1]
-                loss += 1000 * F.mse_loss(mask, self.input_mask_torch)
+                #loss += 1000 * F.mse_loss(mask, self.input_mask_torch)
                 totalLoss += loss
 
                 #print(f"Image traitée {image_path} avec perte: {loss.item()}")
@@ -238,7 +300,7 @@ class GUI:
         self.optimizer = self.renderer.gaussians.optimizer
 
         # default camera
-        if self.opt.mvdream or self.opt.imagedream:
+        """ if self.opt.mvdream or self.opt.imagedream:
             # the second view is the front view for mvdream/imagedream.
             pose = orbit_camera(self.opt.elevation, 90, self.opt.radius)
         else:
@@ -251,7 +313,7 @@ class GUI:
             self.cam.fovx,
             self.cam.near,
             self.cam.far,
-        )
+        ) """
 
         self.enable_sd = self.opt.lambda_sd > 0 and self.prompt != ""
         self.enable_zero123 = self.opt.lambda_zero123 > 0 and self.input_img is not None
@@ -321,7 +383,13 @@ class GUI:
             ### known view
             ### Process images with DreamGaussian
             # Appel de la méthode pour traiter les images spécifiées
+
+            self.tran_mat_to_save = []
+            self.pose_to_save = []
             loss=self.process_images_with_dreamgaussian()
+            
+            np.save('trans_mat.npy', np.array(self.tran_mat_to_save, dtype=np.float64))
+            np.save('pose.npy', np.array(self.pose_to_save, dtype=np.float64))
 
             ### novel view (manual batch)
             render_resolution = 128 if step_ratio < 0.3 else (256 if step_ratio < 0.6 else 512)
@@ -332,75 +400,87 @@ class GUI:
             min_ver = max(min(self.opt.min_ver, self.opt.min_ver - self.opt.elevation), -80 - self.opt.elevation)
             max_ver = min(max(self.opt.max_ver, self.opt.max_ver - self.opt.elevation), 80 - self.opt.elevation)
 
-            for _ in range(self.opt.batch_size):
+            if self.step<=200:
+                for _ in range(self.opt.batch_size):
 
-                # render random view
-                ver = np.random.randint(min_ver, max_ver)
-                hor = np.random.randint(-180, 180)
-                radius = 0
+                    # render random view
+                    ver = np.random.randint(min_ver, max_ver)
+                    hor = np.random.randint(-180, 180)
+                    radius = 0
 
-                vers.append(ver)
-                hors.append(hor)
-                radii.append(radius)
+                    vers.append(ver)
+                    hors.append(hor)
+                    radii.append(radius)
 
-                pose = orbit_camera(self.opt.elevation + ver, hor, self.opt.radius + radius)
-                poses.append(pose)
+                    pose = orbit_camera(self.opt.elevation + ver, hor, self.opt.radius + radius)
+                    poses.append(pose)
 
-                cur_cam = MiniCam(pose, render_resolution, render_resolution, self.cam.fovy, self.cam.fovx, self.cam.near, self.cam.far)
+                    cur_cam = MiniCam(pose, render_resolution, render_resolution, self.cam.fovy, self.cam.fovx, self.cam.near, self.cam.far)
 
-                bg_color = torch.tensor([1, 1, 1] if np.random.rand() > self.opt.invert_bg_prob else [0, 0, 0], dtype=torch.float32, device="cuda")
-                out = self.renderer.render(cur_cam, bg_color=bg_color)
+                    bg_color = torch.tensor([1, 1, 1] if np.random.rand() > self.opt.invert_bg_prob else [0, 0, 0], dtype=torch.float32, device="cuda")
+                    out = self.renderer.render(cur_cam, bg_color=bg_color)
+                    self.out=out
 
-                image = out["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
-                images.append(image)
+                    image = out["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
+                    images.append(image)
+                    image2 = image.squeeze(0)  # Passer de [1, 3, H, W] à [3, H, W]
+                    image2 = image2.permute(1, 2, 0)  # Passer de [3, H, W] à [H, W, 3]
 
-                # enable mvdream training
-                if self.opt.mvdream or self.opt.imagedream:
-                    for view_i in range(1, 4):
-                        pose_i = orbit_camera(self.opt.elevation + ver, hor + 90 * view_i, self.opt.radius + radius)
-                        poses.append(pose_i)
+                    # Assurez-vous que les valeurs sont entre 0 et 255 (pour l'image RGB)
+                    image2 = (image2 * 255).clamp(0, 255).byte()  # Normaliser et convertir en entier
 
-                        cur_cam_i = MiniCam(pose_i, render_resolution, render_resolution, self.cam.fovy, self.cam.fovx, self.cam.near, self.cam.far)
-
-                        # bg_color = torch.tensor([0.5, 0.5, 0.5], dtype=torch.float32, device="cuda")
-                        out_i = self.renderer.render(cur_cam_i, bg_color=bg_color)
-
-                        image = out_i["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
-                        images.append(image)
+                    # Enregistrer l'image avec OpenCV
+                    cv2.imwrite('output_image_opencv_faa.jpg', image2.cpu().numpy())
+                    #np.save('random_pose.npy', np.array(poses, dtype=np.float64))
                     
-            images = torch.cat(images, dim=0)
-            poses = torch.from_numpy(np.stack(poses, axis=0)).to(self.device)
 
-            # import kiui
-            # print(hor, ver)
-            # kiui.vis.plot_image(images)
+                    # enable mvdream training
+                    if self.opt.mvdream or self.opt.imagedream:
+                        for view_i in range(1, 4):
+                            pose_i = orbit_camera(self.opt.elevation + ver, hor + 90 * view_i, self.opt.radius + radius)
+                            poses.append(pose_i)
 
-            # guidance loss
-            if self.enable_sd:
-                if self.opt.mvdream or self.opt.imagedream:
-                    loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(images, poses, step_ratio=step_ratio if self.opt.anneal_timestep else None)
-                else:
-                    loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(images, step_ratio=step_ratio if self.opt.anneal_timestep else None)
+                            cur_cam_i = MiniCam(pose_i, render_resolution, render_resolution, self.cam.fovy, self.cam.fovx, self.cam.near, self.cam.far)
 
-            if self.enable_zero123:
-                loss = loss + self.opt.lambda_zero123 * self.guidance_zero123.train_step(images, vers, hors, radii, step_ratio=step_ratio if self.opt.anneal_timestep else None, default_elevation=self.opt.elevation)
-            
-            # optimize step
-            loss.backward()
-            self.optimizer.step()
-            self.optimizer.zero_grad()
+                            # bg_color = torch.tensor([0.5, 0.5, 0.5], dtype=torch.float32, device="cuda")
+                            out_i = self.renderer.render(cur_cam_i, bg_color=bg_color)
 
-            # densify and prune
-            if self.step >= self.opt.density_start_iter and self.step <= self.opt.density_end_iter:
-                viewspace_point_tensor, visibility_filter, radii = out["viewspace_points"], out["visibility_filter"], out["radii"]
-                self.renderer.gaussians.max_radii2D[visibility_filter] = torch.max(self.renderer.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                self.renderer.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                            image = out_i["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
+                            images.append(image)
+                        
+                images = torch.cat(images, dim=0)
+                poses = torch.from_numpy(np.stack(poses, axis=0)).to(self.device)
 
-                if self.step % self.opt.densification_interval == 0:
-                    self.renderer.gaussians.densify_and_prune(self.opt.densify_grad_threshold, min_opacity=0.01, extent=4, max_screen_size=1)
+                # import kiui
+                # print(hor, ver)
+                # kiui.vis.plot_image(images)
+
+                # guidance loss
+                if self.enable_sd:
+                    if self.opt.mvdream or self.opt.imagedream:
+                        loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(images, poses, step_ratio=step_ratio if self.opt.anneal_timestep else None)
+                    else:
+                        loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(images, step_ratio=step_ratio if self.opt.anneal_timestep else None)
+
+                if self.enable_zero123:
+                    loss = loss + self.opt.lambda_zero123 * self.guidance_zero123.train_step(images, vers, hors, radii, step_ratio=step_ratio if self.opt.anneal_timestep else None, default_elevation=self.opt.elevation)
                 
-                if self.step % self.opt.opacity_reset_interval == 0:
-                    self.renderer.gaussians.reset_opacity()
+                # optimize step
+                loss.backward()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+
+                # densify and prune
+                if self.step >= self.opt.density_start_iter and self.step <= self.opt.density_end_iter:
+                    viewspace_point_tensor, visibility_filter, radii = self.out["viewspace_points"], self.out["visibility_filter"], self.out["radii"]
+                    self.renderer.gaussians.max_radii2D[visibility_filter] = torch.max(self.renderer.gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
+                    self.renderer.gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+
+                    if self.step % self.opt.densification_interval == 0:
+                        self.renderer.gaussians.densify_and_prune(self.opt.densify_grad_threshold, min_opacity=0.01, extent=4, max_screen_size=1)
+                    
+                    if self.step % self.opt.opacity_reset_interval == 0:
+                        self.renderer.gaussians.reset_opacity()
 
         ender.record()
         torch.cuda.synchronize()

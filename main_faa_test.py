@@ -16,6 +16,7 @@ from gs_renderer import Renderer, MiniCam
 
 from grid_put import mipmap_linear_grid_put_2d
 from mesh import Mesh, safe_normalize
+import matplotlib.pyplot as plt
 
 class GUI:
     def __init__(self, opt):
@@ -54,6 +55,7 @@ class GUI:
         self.overlay_input_img_ratio = 0.5
 
         self.images_data = []  # To store the data for each image
+        self.train_losses=[]
 
         # Load input data from transforms.json
         if self.opt.transforms_file is not None:
@@ -70,9 +72,9 @@ class GUI:
         self.train_steps = 1  # steps per rendering loop
         
         # load input data from cmdline
-        if self.opt.input is not None:
+        """ if self.opt.input is not None:
             self.load_input(self.opt.input)
-        
+         """
         # override prompt from cmdline
         if self.opt.prompt is not None:
             self.prompt = self.opt.prompt
@@ -90,6 +92,7 @@ class GUI:
             dpg.create_context()
             self.register_dpg()
             self.test_step()
+        
 
     def __del__(self):
         if self.gui:
@@ -116,6 +119,7 @@ class GUI:
         # Charger les transformations depuis le fichier JSON
         with open(transforms_file) as f:
             data = json.load(f)
+            
 
         # Liste d'images sélectionnées (par exemple, par indices ou par chemin)
         selected_images = self.opt.selected_images  # Liste d'indices ou chemins de fichiers
@@ -126,7 +130,7 @@ class GUI:
                 image_path = frame["file_path"].replace("images/", "data/")
 
                 # Modifier l'extension en .png
-                image_path = image_path.rsplit('.', 1)[0] + '.png'
+                #image_path = image_path.rsplit('.', 1)[0] + '.png'
             
                 transform_matrix = np.array(frame["transform_matrix"])
 
@@ -134,11 +138,11 @@ class GUI:
                 azimuth, elevation = self.extract_azimuth_elevation(transform_matrix)
 
                 # Ajouter "_rgba" au nom de fichier de l'image sélectionnée
-                rgba_image_path = self.add_rgba_suffix(image_path)
+                #rgba_image_path = self.add_rgba_suffix(image_path)
 
                 # Stocker les données de l'image avec azimut et élévation
                 self.images_data.append({
-                    "image_path": rgba_image_path,
+                    "image_path": image_path,
                     "azimuth": azimuth,
                     "elevation": elevation,
                     "transform_matrix": transform_matrix,
@@ -181,6 +185,8 @@ class GUI:
         return azimuth_deg, elevation_deg 
     
     def visualize_alignment(self, input_img, rendered_img):
+        import matplotlib
+        matplotlib.use('TKAgg')
         import matplotlib.pyplot as plt
         plt.figure(figsize=(10, 5))
         plt.subplot(1, 2, 1)
@@ -191,7 +197,40 @@ class GUI:
         plt.title("Image rendue")
         plt.show()
     
-    def process_images_with_dreamgaussian(self,step):
+    def normalize_camera_pose(self, pose, radius):
+        # pose: Matrice 4x4 actuelle
+        # radius: Distance fixe caméra-objet
+        cam_position = pose[:3, 3]  # Extraire la position de la caméra
+        direction = cam_position / np.linalg.norm(cam_position)  # Normaliser
+        new_cam_position = direction * radius  # Ajuster au rayon fixe
+        pose[:3, 3] = new_cam_position  # Mettre à jour la position dans la pose
+        return pose
+    
+    def generate_box(self, input_mask):
+        # generate bbox
+        # input_mask = img[..., 3:]
+        rows = np.any(input_mask, axis=1)
+        cols = np.any(input_mask, axis=0)
+        row_min, row_max = np.where(rows)[0][[0, -1]]
+        col_min, col_max = np.where(cols)[0][[0, -1]]
+
+        # Create the bounding box (top-left and bottom-right coordinates)
+        bbox = [col_min, row_min, col_max, row_max]
+
+        return bbox
+    
+    def recenter(self, img, bbox, width, height):
+        bbox_center_x = (bbox[0] + bbox[2]) / 2
+        bbox_center_y = (bbox[1] + bbox[3]) / 2
+        img_center_x, img_center_y = width / 2, height / 2
+        shift_x = img_center_x - bbox_center_x
+        shift_y = img_center_y - bbox_center_y
+        M = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
+        img = cv2.warpAffine(img, M, (width, height))
+        return img
+
+    
+    def process_images_with_dreamgaussian(self):
         totalLoss=0
         for image_data in self.images_data:
             image_path = image_data["image_path"]
@@ -199,11 +238,27 @@ class GUI:
             elevation = image_data["elevation"]
             transform_matrix = np.array(image_data["transform_matrix"],dtype=np.float32)
 
+            R = transform_matrix[:3, :3]  
+            t = transform_matrix[:3, 3]   
+
+            # Calculer la position de la caméra dans le repère monde
+            camera_position_world = -np.dot(R.T, t)
+
+            # Point dans le repère monde (exemple)
+            point_world = np.array([0,0,0]) 
+            # Calculer la distance entre le point et la caméra
+            rayon = np.linalg.norm(point_world - camera_position_world)
             # Utiliser l'azimut et l'élévation pour définir le pose de la caméra
-            pose = orbit_camera(elevation, azimuth, self.opt.radius)
+            pose = orbit_camera(elevation, azimuth, 2)
+            #pose = self.normalize_camera_pose(pose, self.opt.radius)
+            """ cam_position = np.linalg.norm(pose[:3, 3]) 
+            target_position = np.zeros(3)  # Centre de l'objet (par défaut à l'origine)
+            distance = np.linalg.norm(cam_position - target_position)
+            print (f"Image {image_path}: Distance caméra-objet = {distance}") """
+            
             self.fixed_cam = MiniCam(
-                transform_matrix,
-                self.opt.ref_size,
+                pose,
+                self.opt.ref_size2,
                 self.opt.ref_size,
                 self.cam.fovy,
                 self.cam.fovx,
@@ -216,25 +271,30 @@ class GUI:
 
             if self.input_img is not None:
                 self.input_img_torch = torch.from_numpy(self.input_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
-                self.input_img_torch = F.interpolate(self.input_img_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+                #self.input_img_torch = F.interpolate(self.input_img_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
 
                 self.input_mask_torch = torch.from_numpy(self.input_mask).permute(2, 0, 1).unsqueeze(0).to(self.device)
-                self.input_mask_torch = F.interpolate(self.input_mask_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+                #self.input_mask_torch = F.interpolate(self.input_mask_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
+
+                # prepare embeddings
+                with torch.no_grad():
+                    self.guidance_zero123.get_img_embeds(self.input_img_torch)
 
                 # Rendu et calcul de la perte pour l'image actuelle
                 cur_cam = self.fixed_cam
                 out = self.renderer.render(cur_cam)
                 rendered_img = out["image"].cpu().detach().numpy().transpose(1, 2, 0)  # [H, W, 3]
-                if (step>= 450):
+                if (self.step== 4):
                     self.visualize_alignment(self.input_img, rendered_img)
-
+                                    
+                step_ratio = min(1, self.step / self.opt.iters)
                 # Perte RGB
                 image = out["image"].unsqueeze(0)  # [1, 3, H, W] dans [0, 1]
-                loss = F.mse_loss(image, self.input_img_torch)
+                loss = 10000 * (step_ratio if self.opt.warmup_rgb_loss else 1) *F.mse_loss(image, self.input_img_torch)
 
                 # Perte de masque
                 mask = out["alpha"].unsqueeze(0)  # [1, 1, H, W] dans [0, 1]
-                loss += 1000 * F.mse_loss(mask, self.input_mask_torch)
+                #loss += 1000 * F.mse_loss(mask, self.input_mask_torch)
                 totalLoss += loss
 
                 #print(f"Image traitée {image_path} avec perte: {loss.item()}")
@@ -268,7 +328,7 @@ class GUI:
         )
 
         self.enable_sd = self.opt.lambda_sd > 0 and self.prompt != ""
-        self.enable_zero123 = self.opt.lambda_zero123 > 0 and self.input_img is not None
+        self.enable_zero123 = self.opt.lambda_zero123 > 0 #and self.input_img is not None
 
         # lazy load guidance model
         if self.guidance_sd is None and self.enable_sd:
@@ -306,7 +366,7 @@ class GUI:
             self.input_mask_torch = F.interpolate(self.input_mask_torch, (self.opt.ref_size, self.opt.ref_size), mode="bilinear", align_corners=False)
 
         # prepare embeddings
-        with torch.no_grad():
+        """  with torch.no_grad():
 
             if self.enable_sd:
                 if self.opt.imagedream:
@@ -316,13 +376,13 @@ class GUI:
 
             if self.enable_zero123:
                 self.guidance_zero123.get_img_embeds(self.input_img_torch)
-
+ """
     def train_step(self):
         starter = torch.cuda.Event(enable_timing=True)
         ender = torch.cuda.Event(enable_timing=True)
         starter.record()
 
-        for step in range(self.train_steps):
+        for _ in range(self.train_steps):
 
             self.step += 1
             step_ratio = min(1, self.step / self.opt.iters)
@@ -336,7 +396,7 @@ class GUI:
             ### Process images with DreamGaussian
             # Appel de la méthode pour traiter les images spécifiées
             self.pose2=[]
-            loss=self.process_images_with_dreamgaussian(step)
+            loss=self.process_images_with_dreamgaussian()
             np.save('extrinsicsZ2.npy', np.array(self.pose2, dtype=np.float64))
 
             ### novel view (manual batch)
@@ -409,6 +469,9 @@ class GUI:
             if self.enable_zero123:
                 loss = loss + self.opt.lambda_zero123 * self.guidance_zero123.train_step(images, vers, hors, radii, step_ratio=step_ratio if self.opt.anneal_timestep else None, default_elevation=self.opt.elevation)
             
+            # save loss
+            self.train_losses.append(loss.cpu().detach().numpy())
+
             # optimize step
             loss.backward()
             self.optimizer.step()
@@ -525,21 +588,19 @@ class GUI:
                 self.bg_remover = rembg.new_session()
             img = rembg.remove(img, session=self.bg_remover)
 
-        img = cv2.resize(img, (self.W, self.H), interpolation=cv2.INTER_AREA)
+        #img = cv2.resize(img, (self.W, self.H), interpolation=cv2.INTER_AREA)
         img = img.astype(np.float32) / 255.0
-
-        self.input_mask = img[..., 3:]
+        #self.input_mask = img[..., 3:]
+        mask = img[..., -1] > 0
         # white bg
-        self.input_img = img[..., :3] * self.input_mask + (1 - self.input_mask)
+        bbox = self.generate_box(mask)
+        height, width = img.shape[:2]
+        carved_image = self.recenter(img, bbox, width, height)
+        self.input_mask = carved_image[..., 3:]
+        # white bg
+        self.input_img = carved_image[..., :3] * self.input_mask + (1 - self.input_mask)
         # bgr to rgb
         self.input_img = self.input_img[..., ::-1].copy()
-
-        # load prompt
-        file_prompt = file.replace("_rgba.png", "_caption.txt")
-        if os.path.exists(file_prompt):
-            print(f'[INFO] load prompt from {file_prompt}...')
-            with open(file_prompt, "r") as f:
-                self.prompt = f.read().strip()
 
     @torch.no_grad()
     def save_model(self, mode='geo', texture_size=1024):
@@ -1033,6 +1094,23 @@ class GUI:
                 self.train_step()
             # do a last prune
             self.renderer.gaussians.prune(min_opacity=0.01, extent=1, max_screen_size=1)
+        #self.train_losses=self.train_losses.cpu().numpy()
+        epochs = range(1, len(self.train_losses) + 1)
+
+        # Création de la figure
+        plt.figure(figsize=(10, 6))
+        plt.plot(epochs, self.train_losses, label='Train Loss', marker='o')
+        # Personnalisation
+        plt.title('Evolution des pertes (Loss) au cours des époques')
+        plt.xlabel('Époques')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig("loss_plot.png", dpi=300, bbox_inches='tight') 
+
+        # Affichage
+        #plt.show()
+
         # save
         self.save_model(mode='model')
         self.save_model(mode='geo+tex')

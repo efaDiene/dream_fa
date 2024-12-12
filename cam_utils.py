@@ -43,6 +43,8 @@ def look_at(campos, target, opengl=True):
 def extract_azimuth_elevation(T):
     # Matrice de rotation (3x3)
     R = T[:3, :3]
+    t = T[:3, 3]   # Vecteur de translation
+
     
     # Azimut (angle horizontal autour de l'axe z)
     azimuth = np.arctan2(R[1, 0], R[0, 0])  # atan2(R[1, 0], R[0, 0])
@@ -52,9 +54,9 @@ def extract_azimuth_elevation(T):
     
     # Conversion en degrés si nécessaire
     azimuth_deg = np.rad2deg(azimuth)
-    elevation_deg = np.rad2deg(elevation)
+    elevation_deg = np.rad2deg(elevation)#/np.linalg.norm(t)
     
-    return azimuth_deg, elevation_deg
+    return azimuth_deg, elevation_deg ,np.linalg.norm(t)
 
 
 # elevation & azimuth to pose (cam2world) matrix
@@ -75,7 +77,27 @@ def orbit_camera(elevation, azimuth, radius=1, is_degree=True, target=None, open
     T = np.eye(4, dtype=np.float32)
     T[:3, :3] = look_at(campos, target, opengl)
     T[:3, 3] = campos
-    return T
+    """ M_invert_yz = np.array([
+    [ 1,  0,  0,  0],  # X reste inchangé
+    [ 0, -1,  0,  0],  # Y inversé
+    [ 0,  0, -1,  0],  # Z inversé
+    [ 0,  0,  0,  1],   # Homogène
+    ], dtype=np.float32) """
+
+    return T #@M_invert_yz
+
+def orbit_camera2(T):
+    R = T[:3, :3]  # Matrice de rotation
+    t = T[:3, 3]   # Vecteur de translation
+    
+    # Calcul de la position de la caméra
+    camera_position = -np.dot(R.T, t)
+    x, y, z= camera_position
+    target = np.zeros([3], dtype=np.float32)
+    #campos = np.array([x, y, z]) + target  # [3]
+    azimuth_rad = np.arctan2(x, z)
+    elevation_rad = np.arcsin(y / np.linalg.norm(camera_position))  # Norme = rayon
+    return np.degrees(azimuth_rad), np.degrees(elevation_rad)
 
 
 class OrbitCamera:

@@ -15,6 +15,8 @@ from gs_renderer import Renderer, MiniCam
 
 from grid_put import mipmap_linear_grid_put_2d
 from mesh import Mesh, safe_normalize
+import matplotlib.pyplot as plt
+
 
 class GUI:
     def __init__(self, opt):
@@ -51,6 +53,11 @@ class GUI:
         self.input_mask_torch = None
         self.overlay_input_img = False
         self.overlay_input_img_ratio = 0.5
+
+        self.train_losses=[]
+        self.rgb_losses=[]
+        self.mask_losses=[]
+        self.sd_losses=[]
 
         # input text
         self.prompt = ""
@@ -128,6 +135,8 @@ class GUI:
             self.cam.near,
             self.cam.far,
         )
+        self.pose_to_save = [pose]
+        np.save('pose_unique.npy', np.array(self.pose_to_save, dtype=np.float64))
 
         self.enable_sd = self.opt.lambda_sd > 0 and self.prompt != ""
         self.enable_zero123 = self.opt.lambda_zero123 > 0 and self.input_img is not None
@@ -201,11 +210,17 @@ class GUI:
 
                 # rgb loss
                 image = out["image"].unsqueeze(0) # [1, 3, H, W] in [0, 1]
+                rgb_loss= F.mse_loss(image, self.input_img_torch)
+
                 loss = loss + 10000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(image, self.input_img_torch)
+                self.rgb_losses.append(rgb_loss.cpu().detach().numpy())
 
                 # mask loss
                 mask = out["alpha"].unsqueeze(0) # [1, 1, H, W] in [0, 1]
+                mask_loss = F.mse_loss(mask, self.input_mask_torch)
+
                 loss = loss + 1000 * (step_ratio if self.opt.warmup_rgb_loss else 1) * F.mse_loss(mask, self.input_mask_torch)
+                self.mask_losses.append(mask_loss.cpu().detach().numpy())
 
             ### novel view (manual batch)
             render_resolution = 128 if step_ratio < 0.3 else (256 if step_ratio < 0.6 else 512)
@@ -262,6 +277,7 @@ class GUI:
                     
             images = torch.cat(images, dim=0)
             poses = torch.from_numpy(np.stack(poses, axis=0)).to(self.device)
+            np.save('randomp_p_unique.npy', np.array(poses.cpu(), dtype=np.float64))
 
             # import kiui
             # print(hor, ver)
@@ -275,8 +291,15 @@ class GUI:
                     loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(images, step_ratio=step_ratio if self.opt.anneal_timestep else None)
 
             if self.enable_zero123:
+                sd_loss = self.guidance_zero123.train_step(images, vers, hors, radii, step_ratio=step_ratio if self.opt.anneal_timestep else None, default_elevation=self.opt.elevation)
+
                 loss = loss + self.opt.lambda_zero123 * self.guidance_zero123.train_step(images, vers, hors, radii, step_ratio=step_ratio if self.opt.anneal_timestep else None, default_elevation=self.opt.elevation)
             
+            
+            # save loss
+            self.sd_losses.append(sd_loss.cpu().detach().numpy())
+            self.train_losses.append(loss.cpu().detach().numpy())
+
             # optimize step
             loss.backward()
             self.optimizer.step()
@@ -892,6 +915,10 @@ class GUI:
                 self.train_step()
             self.test_step()
             dpg.render_dearpygui_frame()
+
+    # Fonction de calcul de la moyenne mobile
+    def moving_average(dself, data, window_size):
+        return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
     
     # no gui mode
     def train(self, iters=500):
@@ -904,6 +931,33 @@ class GUI:
         # save
         self.save_model(mode='model')
         self.save_model(mode='geo+tex')
+
+        #self.train_losses=self.train_losses.cpu().numpy()
+        epochs = range(1, len(self.train_losses) + 1)
+
+        # Calcul de la moyenne mobile
+        window_size = 10
+        smoothed_losses = self.moving_average(self.train_losses, window_size)
+        #epochs = range(1, len(smoothed_losses) + 1)
+
+        # Création de la figure
+        plt.figure(figsize=(10, 6))
+        #plt.plot(epochs, smoothed_losses, label='Train Loss', marker='o')
+        #plt.plot(epochs, self.train_losses, label='Train Loss', marker='o')
+        plt.plot(epochs, self.rgb_losses, label='rgb Loss', marker='s')
+        plt.plot(epochs, self.mask_losses, label='mask Loss', marker='p')
+        #plt.plot(epochs, self.sd_losses, label='sd Loss', marker='*')
+
+        # Personnalisation
+        plt.title('Evolution des pertes (Loss) au cours des époques')
+        plt.xlabel('Époques')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig("loss_plot_rgb_mask_lo.png", dpi=300, bbox_inches='tight') 
+
+        # Affichage
+        #plt.show()
         
 
 if __name__ == "__main__":

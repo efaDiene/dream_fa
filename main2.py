@@ -10,6 +10,8 @@ import torch.nn.functional as F
 
 import trimesh
 import rembg
+import matplotlib.pyplot as plt
+
 
 from cam_utils import orbit_camera, OrbitCamera
 from mesh_renderer import Renderer
@@ -50,6 +52,7 @@ class GUI:
         self.input_mask_torch = None
         self.overlay_input_img = False
         self.overlay_input_img_ratio = 0.5
+        self.rgb_losses=[]
 
         # input text
         self.prompt = ""
@@ -186,6 +189,7 @@ class GUI:
                 image = out["image"] # [H, W, 3] in [0, 1]
                 valid_mask = ((out["alpha"] > 0) & (out["viewcos"] > 0.5)).detach()
                 loss = loss + F.mse_loss(image * valid_mask, self.input_img_torch_channel_last * valid_mask)
+                self.rgb_losses.append(F.mse_loss(image * valid_mask, self.input_img_torch_channel_last * valid_mask).cpu().detach().numpy())
 
             ### novel view (manual batch)
             render_resolution = 512
@@ -689,6 +693,25 @@ class GUI:
                 self.train_step()
         # save
         self.save_model()
+
+        #self.train_losses=self.train_losses.cpu().numpy()
+        epochs = range(1, len(self.rgb_losses) + 1)
+        # Création de la figure
+        plt.figure(figsize=(10, 6))
+        #plt.plot(epochs, smoothed_losses, label='Train Loss', marker='o')
+        #plt.plot(epochs, self.train_losses, label='Train Loss', marker='o')
+        plt.plot(epochs, self.rgb_losses, label='rgb Loss', marker='s')
+        #plt.plot(epochs, self.mask_losses, label='mask Loss', marker='p')
+        #plt.plot(epochs, self.sd_losses, label='sd Loss', marker='*')
+
+        # Personnalisation
+        plt.title('Evolution des pertes (Loss) au cours des époques')
+        plt.xlabel('Époques')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig("loss_plot_rgb_stage2_lo.png", dpi=300, bbox_inches='tight') 
+
         
 
 if __name__ == "__main__":

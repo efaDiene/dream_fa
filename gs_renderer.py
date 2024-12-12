@@ -425,14 +425,20 @@ class GaussianModel:
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
                         np.asarray(plydata.elements[0]["y"]),
                         np.asarray(plydata.elements[0]["z"])),  axis=1)
-        opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+        #opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+        # Vérifier si le champ `opacity` existe, sinon utiliser une valeur par défaut
+        if "opacity" in plydata.elements[0].data.dtype.names:
+            opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+        else:
+            opacities = np.ones((xyz.shape[0], 1), dtype=np.float32)  # Opacité par défaut de 1.0
+
 
         print("Number of points at loading : ", xyz.shape[0])
 
         features_dc = np.zeros((xyz.shape[0], 3, 1))
-        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
-        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
-        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
+        #features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        #features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
+        #features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
 
         extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
         assert len(extra_f_names)==3*(self.max_sh_degree + 1) ** 2 - 3
@@ -659,6 +665,34 @@ class MiniCam:
         w2c[1:3, :3] *= -1
         w2c[:3, 3] *= -1
 
+        self.world_view_transform = torch.tensor(w2c).transpose(0, 1).cuda()
+        self.projection_matrix = (
+            getProjectionMatrix(
+                znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy
+            )
+            .transpose(0, 1)
+            .cuda()
+        )
+        self.full_proj_transform = self.world_view_transform @ self.projection_matrix
+        self.camera_center = -torch.tensor(c2w[:3, 3]).cuda()
+
+
+class MiniCam2:
+    def __init__(self, w2c, width, height, fovy, fovx, znear, zfar):
+        # c2w (pose) should be in NeRF convention.
+
+        self.image_width = width
+        self.image_height = height
+        self.FoVy = fovy
+        self.FoVx = fovx
+        self.znear = znear
+        self.zfar = zfar
+
+        c2w = np.linalg.inv(w2c)
+        # rectify...
+        w2c[1:3, :3] *= -1
+        w2c[:3, 3] *= -1
+ 
         self.world_view_transform = torch.tensor(w2c).transpose(0, 1).cuda()
         self.projection_matrix = (
             getProjectionMatrix(
